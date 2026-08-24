@@ -123,6 +123,9 @@ node "$project_root/scripts/write-comparison-skip.mjs" \
   git -C "$project_root" status --short
   printf 'working_tree_status_end\n'
   uname -a
+  if command -v sw_vers >/dev/null 2>&1; then
+    sw_vers
+  fi
   alr --version
   alr toolchain
   alr exec -- gprbuild --version
