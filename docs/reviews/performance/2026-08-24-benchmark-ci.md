@@ -57,13 +57,100 @@ the workflow does not claim a transitively immutable action graph.
 
 ## Evidence
 
-The earlier local result bundles are superseded: they predate RapidJSON Reader
-reuse, the exact 40-population parser validator, and the complete provenance
-manifest. Fresh portable and native evidence is collected only after the
-reviewed harness is committed, so the recorded commit identifies the measured
-code without relying on a path-only dirty-worktree inventory.
+Fresh portable and native runs completed sequentially from clean detached
+commit `d7b32a28f8944501221e388b921ec34844c5f993` on an Apple M3 Max
+(Mac15,9), macOS 26.5.2 build 25F84. The measured Ada, C, and C++ units used
+GNAT-FSF GCC/G++ 16.1.0. The selected GPRbuild provider is 26.0.1, while its
+executable reports 26.0.0. Rust used 1.97.1. Node/npm used 24.19.0/11.17.0.
+Apple Clang 21.0.0 built only standalone ABI smoke executables, not the linked
+comparison driver.
+
+Both runs passed all adapter suites, exact 40-population parser validation,
+exact 63-population comparison validation, semantic checksum preflights, the
+structured serde_json/deep-nesting skip, and all 66 artifact manifest entries.
+The portable harness applied no host-detected/native tuning switch; GNAT still
+emitted its target baseline for binder code. Native Ada/C/C++ used
+`-mcpu=native`, and native Rust used `-Ctarget-cpu=native`.
+
+The complete bundles' `SHA256SUMS` file digests are:
+
+- portable: `df82b498b862266097f7b031180db5430bbd23618aa1a4c96823578f923365b5`;
+- native: `c566b9c933e93269d6986a1ad2e4ff7145852d9286e94776a40ccefc944f4ca7`.
+
+The compact machine-readable baseline is retained under
+`benchmarks/baselines/directional/local/2026-08-24/d7b32a28f8944501221e388b921ec34844c5f993/`.
+It includes both JSONL result sets, derived TSVs, structured skips, environment
+records, dependency resolution, and a manifest. The full bundles have no
+durable external location; their omitted binaries, fixtures, locks, and logs
+remain digest-attested but are not locally inspectable from the compact copy.
+Linux execution remains CI evidence to collect after push. No Linux or
+multi-GNAT performance claim is made from this local run.
+
+## Directional comparison
+
+Each cell is median binary throughput in MiB/s over 50 `flyology_bench`
+samples. These shared, non-isolated local runs are directional, and several
+populations have high variance. Lanes describe materially different work and
+must not be combined into one leaderboard.
+
+Portable track:
+
+| Fixture | Flyology events | RapidJSON SAX events | yyjson validate | simdjson DOM | RapidJSON DOM | serde_json DOM | sonic-rs DOM | simd-json DOM |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| small mixed | 128.9 | 535.0 | 491.4 | 486.6 | 106.3 | 112.5 | 147.4 | 53.2 |
+| large mixed | 159.1 | 507.1 | 1,771.6 | 612.4 | 338.3 | 115.7 | 329.4 | 106.0 |
+| string heavy | 703.1 | 495.2 | 3,883.9 | 910.5 | 336.3 | 822.6 | 839.5 | 764.9 |
+| number heavy | 163.0 | 255.2 | 1,081.1 | 655.6 | 448.8 | 351.0 | 403.3 | 310.5 |
+| long mantissas | 301.4 | 260.5 | 1,978.9 | 9.0 | 1,002.9 | 1,048.6 | 951.2 | 721.5 |
+| deep nesting | 155.9 | 226.2 | 677.4 | 154.0 | 92.9 | skipped | 44.7 | 14.6 |
+| large array | 209.1 | 1,075.0 | 1,796.5 | 665.4 | 426.6 | 406.8 | 315.0 | 312.7 |
+| large object | 150.5 | 860.5 | 3,320.6 | 413.8 | 384.4 | 75.7 | 852.5 | 193.1 |
+
+Native track:
+
+| Fixture | Flyology events | RapidJSON SAX events | yyjson validate | simdjson DOM | RapidJSON DOM | serde_json DOM | sonic-rs DOM | simd-json DOM |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| small mixed | 132.3 | 529.9 | 495.0 | 487.2 | 107.4 | 112.0 | 144.6 | 52.4 |
+| large mixed | 156.9 | 503.7 | 1,787.3 | 611.8 | 331.5 | 113.2 | 311.1 | 105.6 |
+| string heavy | 699.1 | 494.1 | 3,843.7 | 910.2 | 336.4 | 810.5 | 831.1 | 750.6 |
+| number heavy | 160.6 | 254.1 | 1,096.5 | 654.5 | 470.6 | 368.0 | 411.3 | 314.5 |
+| long mantissas | 296.4 | 257.2 | 1,987.3 | 9.0 | 996.8 | 1,050.7 | 962.2 | 676.9 |
+| deep nesting | 155.5 | 221.2 | 662.3 | 154.5 | 27.1 | skipped | 16.7 | 14.6 |
+| large array | 193.4 | 966.1 | 1,737.7 | 660.1 | 437.2 | 384.3 | 313.0 | 286.1 |
+| large object | 151.9 | 857.7 | 3,298.7 | 909.4 | 418.9 | 83.5 | 831.4 | 211.9 |
+
+Flyology events versus RapidJSON SAX is the closest directional context, not a
+contract-comparable result. Flyology rejects decoded duplicate names with a
+bounded crit-bit index and explicit capacities; RapidJSON preserves duplicates
+and declares no equivalent depth limit. These valid fixtures avoid outcome
+disagreement, but Flyology still performs the additional duplicate-index work.
+RapidJSON also emits coarser complete-token callbacks while Flyology emits its
+incremental begin/fragment/end grammar.
+
+In the lower-variance portable run, whose event-lane CVs ranged from 0.55% to
+8.86%, observed Flyology median throughput was 1.42x RapidJSON SAX on
+string-heavy input and 1.16x on the adversarial 19-significant-digit mantissa
+input. RapidJSON's observed median was about 1.5x to 5.7x Flyology on the other
+six fixtures; the largest gaps remain the structurally dense array and
+duplicate-checked object. These medians identify optimization priorities and
+do not establish population-level speed claims.
+
+yyjson's validation lane and all DOM lanes remain useful context, not peers.
+The 19-significant-digit mantissa stress case drove simdjson DOM to about
+9 MiB/s in both tracks; that observation is not representative numeric
+throughput. Several native populations had high variance, and native-track
+medians were not uniformly higher, reinforcing the directional classification.
 
 ## Findings
 
-The final P0/P1/P2 findings and fresh measurements are recorded after the
-committed harness runs complete.
+P0: none.
+
+P1: none after correcting parser lifecycle fairness, observation work, Rust
+ownership, cross-language linking, exact matrix validation, durable baseline
+retention, compiler identity, and artifact-finalization failure handling.
+
+P2: none for this directional milestone after separating target-reported parser
+storage from exact semantic identities and making native architecture support
+fail closed. Raw per-sample scorecards, interleaved controlled-host runs,
+allocation hooks, Ada competitor lanes, and writer comparisons remain explicit
+future work rather than claims made by these results.

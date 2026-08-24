@@ -1,0 +1,7 @@
+crate=flyology_bench
+version=0.1.1-dev
+pinned=false
+origin=git+https://github.com/flyology-ada/flyology.git
+commit=3859f412c4d0a5119548244b0546803e1627be32
+subdir=flyology_bench
+generated_lock_sha256=c40adc1dece3157ec6782abcc7f307d677c3d9fabed24beb4f98f2c19b94b3ed
