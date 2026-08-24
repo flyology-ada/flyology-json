@@ -1,0 +1,19 @@
+name = "flyology_json_parser_benchmarks"
+description = "Reproducible parser baselines for flyology_json"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+website = "https://github.com/flyology-ada/flyology-json"
+tags = ["ada", "json", "benchmark", "parser"]
+project-files = ["flyology_json_parser_benchmarks.gpr"]
+executables = ["flyology_json-parser_benchmark"]
+
+[[depends-on]]
+flyology_bench = "=0.1.1-dev"
+gnat = ">=13 & <17"
+
+[build-switches]
+"*" = { Compile_Checks = "none", Runtime_Checks = "none", Style_Checks = "no" }
