@@ -85,3 +85,22 @@ output. Retain an official baseline only from a clean checkout; a run over
 uncommitted parser changes is a harness smoke test. Do not compare runs
 collected under different chunk schedules or fixture byte counts as though they
 measured the same operation.
+
+## External comparisons
+
+The maintained cross-implementation contract is under
+[`comparison/`](comparison/README.md). It fixes independent parser and writer
+lanes, portable and native build tracks, capability and result disclosures,
+and exact benchmark-only source attestations. External libraries never become
+dependencies of the production `flyology_json` crate.
+
+Acquire and verify the approved source archives outside the checkout with:
+
+```sh
+scripts/verify-benchmark-sources.sh
+```
+
+The verifier checks byte length, SHA-256, and the exact license files recorded
+in the lock manifests. It downloads archives but does not extract or vendor
+them. In particular, RapidJSON's restrictively licensed `bin/jsonchecker/`
+content must never enter a build tree or this repository.

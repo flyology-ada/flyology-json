@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Flyology JSON comparison capability skip",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "ci", "implementation", "unsupported", "detail"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_schema_sha256",
+        "skip_schema_sha256",
+        "sources_lock_sha256",
+        "harness_commit"
+      ],
+      "properties": {
+        "capability_schema_sha256": { "$ref": "#/$defs/sha256" },
+        "skip_schema_sha256": { "$ref": "#/$defs/sha256" },
+        "sources_lock_sha256": { "$ref": "#/$defs/sha256" },
+        "harness_commit": { "type": "string", "minLength": 7 }
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger", "provider", "workflow", "job", "run_id", "attempt"],
+      "properties": {
+        "trigger": { "enum": ["pull_request", "push", "weekly", "manual", "local"] },
+        "provider": { "type": "string" },
+        "workflow": { "type": "string" },
+        "job": { "type": "string" },
+        "run_id": { "type": "string" },
+        "attempt": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation_id",
+        "source_id",
+        "source_revision",
+        "capability_sha256"
+      ],
+      "properties": {
+        "implementation_id": { "type": "string", "minLength": 1 },
+        "source_id": { "type": "string", "minLength": 1 },
+        "source_revision": { "type": "string", "minLength": 1 },
+        "capability_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "unsupported": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "os", "architecture", "toolchain", "lane"],
+      "properties": {
+        "reason": {
+          "enum": [
+            "unsupported_os",
+            "unsupported_architecture",
+            "unsupported_toolchain",
+            "unsupported_lane"
+          ]
+        },
+        "os": { "type": ["string", "null"] },
+        "architecture": { "type": ["string", "null"] },
+        "toolchain": { "type": ["string", "null"] },
+        "lane": {
+          "oneOf": [
+            {
+              "enum": [
+                "parse_validate",
+                "parse_events",
+                "parse_incremental",
+                "parse_dom",
+                "write_stream",
+                "write_dom",
+                "parse_write"
+              ]
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "detail": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "unsupported": {
+            "properties": { "reason": { "const": "unsupported_os" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "unsupported": {
+            "properties": { "os": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "unsupported": {
+            "properties": { "reason": { "const": "unsupported_architecture" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "unsupported": {
+            "properties": { "architecture": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "unsupported": {
+            "properties": { "reason": { "const": "unsupported_toolchain" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "unsupported": {
+            "properties": { "toolchain": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "unsupported": {
+            "properties": { "reason": { "const": "unsupported_lane" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "unsupported": {
+            "properties": {
+              "lane": {
+                "enum": [
+                  "parse_validate",
+                  "parse_events",
+                  "parse_incremental",
+                  "parse_dom",
+                  "write_stream",
+                  "write_dom",
+                  "parse_write"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

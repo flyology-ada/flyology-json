@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Flyology JSON benchmark implementation capability",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "implementation_id",
+    "display_name",
+    "source_id",
+    "source_revision",
+    "boundary",
+    "build_tracks",
+    "lanes",
+    "profiles",
+    "output_policies",
+    "memory"
+  ],
+  "properties": {
+    "implementation_id": { "type": "string", "minLength": 1 },
+    "display_name": { "type": "string", "minLength": 1 },
+    "source_id": { "type": "string", "minLength": 1 },
+    "source_revision": { "type": "string", "minLength": 1 },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason", "retains_input", "hidden_io", "abi_test"],
+      "properties": {
+        "kind": {
+          "enum": ["direct_ada", "direct_c", "coarse_cpp", "coarse_rust"]
+        },
+        "reason": { "type": "string" },
+        "retains_input": { "type": "boolean" },
+        "hidden_io": { "type": "boolean" },
+        "abi_test": { "type": "string", "minLength": 1 }
+      }
+    },
+    "build_tracks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["portable", "native"],
+      "properties": {
+        "portable": { "$ref": "#/$defs/track" },
+        "native": { "$ref": "#/$defs/track" }
+      }
+    },
+    "lanes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/lane" },
+      "minItems": 1
+    },
+    "profiles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/profile" },
+      "minItems": 1
+    },
+    "output_policies": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/output_policy" }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_access",
+        "required_readable_padding_octets",
+        "required_writable_padding_octets",
+        "copy_policy",
+        "allocation_reporting",
+        "peak_memory_reporting"
+      ],
+      "properties": {
+        "input_access": { "enum": ["read_only", "mutable"] },
+        "required_readable_padding_octets": { "type": "integer", "minimum": 0 },
+        "required_writable_padding_octets": { "type": "integer", "minimum": 0 },
+        "copy_policy": {
+          "enum": ["none", "reusable_preparation", "per_operation", "internal_unknown"]
+        },
+        "allocation_reporting": {
+          "enum": ["allocator_hook", "api_contract", "estimated", "unavailable"]
+        },
+        "peak_memory_reporting": {
+          "enum": ["allocator_hook", "process_rss", "estimated", "unavailable"]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "track": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported", "reason"],
+      "properties": {
+        "supported": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    },
+    "lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane",
+        "supported",
+        "api",
+        "profile_ids",
+        "output_policy_ids",
+        "observable_result",
+        "limitations"
+      ],
+      "properties": {
+        "lane": {
+          "enum": [
+            "parse_validate",
+            "parse_events",
+            "parse_incremental",
+            "parse_dom",
+            "write_stream",
+            "write_dom",
+            "parse_write"
+          ]
+        },
+        "supported": { "type": "boolean" },
+        "api": { "type": "string" },
+        "profile_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "output_policy_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "observable_result": { "type": "string" },
+        "limitations": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "top_level_scalars",
+        "bom",
+        "malformed_utf8",
+        "unpaired_surrogates",
+        "duplicate_names",
+        "comments",
+        "trailing_commas",
+        "raw_controls",
+        "nonstandard_numbers",
+        "nonfinite_numbers",
+        "number_handling",
+        "maximum_depth",
+        "other_limits"
+      ],
+      "properties": {
+        "profile_id": { "type": "string", "minLength": 1 },
+        "top_level_scalars": { "type": "boolean" },
+        "bom": { "enum": ["reject", "accept", "ignore"] },
+        "malformed_utf8": { "enum": ["reject", "replace", "accept_unchecked"] },
+        "unpaired_surrogates": {
+          "enum": ["reject", "replace", "preserve_code_units", "accept_unspecified"]
+        },
+        "duplicate_names": {
+          "enum": [
+            "reject_decoded",
+            "preserve_all",
+            "first_wins",
+            "last_wins",
+            "accept_unspecified"
+          ]
+        },
+        "comments": { "type": "boolean" },
+        "trailing_commas": { "type": "boolean" },
+        "raw_controls": { "type": "boolean" },
+        "nonstandard_numbers": { "type": "boolean" },
+        "nonfinite_numbers": { "type": "boolean" },
+        "number_handling": {
+          "enum": [
+            "exact_lexeme",
+            "checked_conversion",
+            "lossy_conversion",
+            "validation_only",
+            "implementation_specific"
+          ]
+        },
+        "maximum_depth": { "type": ["integer", "null"], "minimum": 0 },
+        "other_limits": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "output_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output_policy_id",
+        "encoding",
+        "bom",
+        "whitespace",
+        "member_order",
+        "number_spelling",
+        "non_ascii",
+        "solidus",
+        "control_escaping",
+        "final_suffix",
+        "canonical"
+      ],
+      "properties": {
+        "output_policy_id": { "type": "string", "minLength": 1 },
+        "encoding": { "type": "string", "minLength": 1 },
+        "bom": { "type": "string", "minLength": 1 },
+        "whitespace": { "type": "string", "minLength": 1 },
+        "member_order": { "type": "string", "minLength": 1 },
+        "number_spelling": { "type": "string", "minLength": 1 },
+        "non_ascii": { "type": "string", "minLength": 1 },
+        "solidus": { "type": "string", "minLength": 1 },
+        "control_escaping": { "type": "string", "minLength": 1 },
+        "final_suffix": { "type": "string", "minLength": 1 },
+        "canonical": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -1,0 +1,329 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Flyology JSON cross-implementation benchmark result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "run",
+    "ci",
+    "host",
+    "build",
+    "implementation",
+    "operation",
+    "work",
+    "memory",
+    "samples_ns",
+    "statistics",
+    "correctness"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "comparison_readme_sha256",
+        "benchmark_readme_sha256",
+        "capability_schema_sha256",
+        "result_schema_sha256",
+        "skip_schema_sha256",
+        "sources_lock_sha256",
+        "licenses_lock_sha256",
+        "ci_protocol_sha256",
+        "harness_commit"
+      ],
+      "properties": {
+        "comparison_readme_sha256": { "$ref": "#/$defs/sha256" },
+        "benchmark_readme_sha256": { "$ref": "#/$defs/sha256" },
+        "capability_schema_sha256": { "$ref": "#/$defs/sha256" },
+        "result_schema_sha256": { "$ref": "#/$defs/sha256" },
+        "skip_schema_sha256": { "$ref": "#/$defs/sha256" },
+        "sources_lock_sha256": { "$ref": "#/$defs/sha256" },
+        "licenses_lock_sha256": { "$ref": "#/$defs/sha256" },
+        "ci_protocol_sha256": { "$ref": "#/$defs/sha256" },
+        "harness_commit": { "type": "string", "minLength": 7 }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "started_at", "round", "order_seed", "classification"],
+      "properties": {
+        "run_id": { "type": "string", "minLength": 1 },
+        "started_at": { "type": "string", "format": "date-time" },
+        "round": { "type": "integer", "minimum": 0 },
+        "order_seed": { "type": "string", "minLength": 1 },
+        "classification": { "enum": ["ordinary_ci", "directional", "formal"] }
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger",
+        "provider",
+        "workflow",
+        "job",
+        "run_id",
+        "attempt",
+        "runner_name",
+        "runner_image",
+        "result_url"
+      ],
+      "properties": {
+        "trigger": { "enum": ["pull_request", "push", "weekly", "manual", "local"] },
+        "provider": { "type": "string" },
+        "workflow": { "type": "string" },
+        "job": { "type": "string" },
+        "run_id": { "type": "string" },
+        "attempt": { "type": ["integer", "null"], "minimum": 1 },
+        "runner_name": { "type": "string" },
+        "runner_image": { "type": "string" },
+        "result_url": { "type": ["string", "null"] }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "os_build",
+        "architecture",
+        "cpu",
+        "cpu_topology",
+        "memory_bytes",
+        "power_mode",
+        "thermal_state",
+        "frequency_policy",
+        "affinity",
+        "isolation_notes"
+      ],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "os_build": { "type": "string", "minLength": 1 },
+        "architecture": { "type": "string", "minLength": 1 },
+        "cpu": { "type": "string", "minLength": 1 },
+        "cpu_topology": { "type": "string", "minLength": 1 },
+        "memory_bytes": { "type": "integer", "minimum": 1 },
+        "power_mode": { "type": "string", "minLength": 1 },
+        "thermal_state": { "type": "string", "minLength": 1 },
+        "frequency_policy": { "type": "string", "minLength": 1 },
+        "affinity": { "type": "string", "minLength": 1 },
+        "isolation_notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "track",
+        "compiler",
+        "compiler_version",
+        "linker",
+        "target",
+        "flags",
+        "isa_features",
+        "lto",
+        "checks",
+        "executable_sha256",
+        "cargo_lock_sha256"
+      ],
+      "properties": {
+        "track": { "enum": ["portable", "native"] },
+        "compiler": { "type": "string", "minLength": 1 },
+        "compiler_version": { "type": "string", "minLength": 1 },
+        "linker": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "flags": { "type": "array", "items": { "type": "string" } },
+        "isa_features": { "type": "array", "items": { "type": "string" } },
+        "lto": { "type": "string", "minLength": 1 },
+        "checks": { "type": "string", "minLength": 1 },
+        "executable_sha256": { "$ref": "#/$defs/sha256" },
+        "cargo_lock_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation_id",
+        "source_id",
+        "version",
+        "revision",
+        "archive_sha256",
+        "capability_sha256",
+        "adapter_sha256"
+      ],
+      "properties": {
+        "implementation_id": { "type": "string", "minLength": 1 },
+        "source_id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "revision": { "type": "string", "minLength": 1 },
+        "archive_sha256": { "$ref": "#/$defs/sha256" },
+        "capability_sha256": { "$ref": "#/$defs/sha256" },
+        "adapter_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lane", "profile_id", "output_policy", "fixture", "chunk_schedule"],
+      "properties": {
+        "lane": {
+          "enum": [
+            "parse_validate",
+            "parse_events",
+            "parse_incremental",
+            "parse_dom",
+            "write_stream",
+            "write_dom",
+            "parse_write"
+          ]
+        },
+        "profile_id": { "type": "string", "minLength": 1 },
+        "output_policy": { "type": ["string", "null"] },
+        "fixture": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fixture_id", "sha256", "input_octets"],
+          "properties": {
+            "fixture_id": { "type": "string", "minLength": 1 },
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "input_octets": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "chunk_schedule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "parameter", "schedule_sha256"],
+          "properties": {
+            "kind": { "enum": ["monolithic", "fixed", "seeded", "not_applicable"] },
+            "parameter": { "type": ["integer", "string", "null"] },
+            "schedule_sha256": {
+              "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+            }
+          }
+        }
+      }
+    },
+    "work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_copy_setup_octets",
+        "input_copy_timed_octets",
+        "padding_setup_octets",
+        "padding_timed_octets",
+        "output_copy_octets",
+        "input_mutated",
+        "precheck_included",
+        "conversion_included",
+        "cleanup_included",
+        "checksum_method",
+        "checksum_timed_units",
+        "operation_checksum"
+      ],
+      "properties": {
+        "input_copy_setup_octets": { "type": "integer", "minimum": 0 },
+        "input_copy_timed_octets": { "type": "integer", "minimum": 0 },
+        "padding_setup_octets": { "type": "integer", "minimum": 0 },
+        "padding_timed_octets": { "type": "integer", "minimum": 0 },
+        "output_copy_octets": { "type": "integer", "minimum": 0 },
+        "input_mutated": { "type": "boolean" },
+        "precheck_included": { "type": "boolean" },
+        "conversion_included": { "type": "boolean" },
+        "cleanup_included": { "type": "boolean" },
+        "checksum_method": { "type": "string", "minLength": 1 },
+        "checksum_timed_units": { "type": "integer", "minimum": 0 },
+        "operation_checksum": { "type": "string", "minLength": 1 }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allocations", "allocated_bytes", "peak_retained_bytes", "process_rss_bytes"],
+      "properties": {
+        "allocations": { "$ref": "#/$defs/counter" },
+        "allocated_bytes": { "$ref": "#/$defs/counter" },
+        "peak_retained_bytes": { "$ref": "#/$defs/counter" },
+        "process_rss_bytes": { "$ref": "#/$defs/counter" }
+      }
+    },
+    "samples_ns": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 0 },
+      "minItems": 1
+    },
+    "statistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "median_ns", "dispersion", "confidence_interval", "outliers_removed"],
+      "properties": {
+        "method": { "type": "string", "minLength": 1 },
+        "median_ns": { "type": "number", "minimum": 0 },
+        "dispersion": { "type": "string", "minLength": 1 },
+        "confidence_interval": { "type": ["string", "null"] },
+        "outliers_removed": { "const": false }
+      }
+    },
+    "correctness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preflight_passed", "output_verified", "suite_commit", "notes"],
+      "properties": {
+        "preflight_passed": { "const": true },
+        "output_verified": { "type": "boolean" },
+        "suite_commit": { "type": "string", "minLength": 7 },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "properties": {
+              "lane": { "enum": ["write_stream", "write_dom", "parse_write"] }
+            },
+            "required": ["lane"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "operation": {
+            "properties": {
+              "output_policy": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "operation": {
+            "properties": {
+              "output_policy": { "type": "null" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "counter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "method", "unavailable_reason"],
+      "properties": {
+        "value": { "type": ["integer", "null"], "minimum": 0 },
+        "method": { "type": "string" },
+        "unavailable_reason": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
