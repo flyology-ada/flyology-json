@@ -1,0 +1,140 @@
+{
+  "implementation_id": "simd-json-0.18.1-borrowed-value",
+  "display_name": "simd-json 0.18.1 BorrowedValue",
+  "source_id": "simd-json",
+  "source_revision": "registry:0.18.1",
+  "boundary": {
+    "kind": "coarse_rust",
+    "reason": "Rust has no stable native ABI; one whole-document staticlib call copies input, parses, and traverses BorrowedValue.",
+    "retains_input": false,
+    "hidden_io": false,
+    "abi_test": "tests/abi_smoke.c and tests/flyology_json-benchmark_rust_tests.adb"
+  },
+  "build_tracks": {
+    "portable": {
+      "supported": true,
+      "reason": "Cargo release profile without target-cpu=native."
+    },
+    "native": {
+      "supported": true,
+      "reason": "Cargo release profile with RUSTFLAGS=-C target-cpu=native."
+    }
+  },
+  "lanes": [
+    {
+      "lane": "parse_validate",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "No adapter is admitted for this lane."
+      ]
+    },
+    {
+      "lane": "parse_events",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "No adapter is admitted for this lane."
+      ]
+    },
+    {
+      "lane": "parse_incremental",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "The selected API is one-shot."
+      ]
+    },
+    {
+      "lane": "parse_dom",
+      "supported": true,
+      "api": "simd_json::to_borrowed_value",
+      "profile_ids": [
+        "simd-json-borrowed-value-default"
+      ],
+      "output_policy_ids": [],
+      "observable_result": "Recursive traversal checksum and visited item count are computed inside the timed call.",
+      "limitations": [
+        "The coarse call creates a fresh writable input copy inside every timed operation.",
+        "The selected profile accepts a lone high surrogate as U+0000; profile-disagreement inputs are excluded from throughput comparisons.",
+        "Recursive adapter traversal is admitted only for preflighted fixtures of depth at most 256; stack or allocator aborts are not caught.",
+        "The checksum groups every DOM number into one kind and follows simd-json object iteration order.",
+        "The registry crate records upstream VCS commit 61d649d13fae83ac6d9f587863696be2741f5b8b."
+      ]
+    },
+    {
+      "lane": "write_stream",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "Writer adapter is deferred."
+      ]
+    },
+    {
+      "lane": "write_dom",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "Writer adapter is deferred."
+      ]
+    },
+    {
+      "lane": "parse_write",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "Writer adapter is deferred."
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "profile_id": "simd-json-borrowed-value-default",
+      "top_level_scalars": true,
+      "bom": "reject",
+      "malformed_utf8": "reject",
+      "unpaired_surrogates": "accept_unspecified",
+      "duplicate_names": "accept_unspecified",
+      "comments": false,
+      "trailing_commas": false,
+      "raw_controls": false,
+      "nonstandard_numbers": false,
+      "nonfinite_numbers": false,
+      "number_handling": "lossy_conversion",
+      "maximum_depth": 1024,
+      "other_limits": [
+        "Default features leave duplicate-key behavior unspecified; duplicate inputs are excluded from throughput comparisons.",
+        "Depth 1024 was accepted and depth 1025 rejected by the maintained adapter test.",
+        "A lone high surrogate was accepted as U+0000 while a lone low surrogate was rejected.",
+        "Exact number lexemes are not retained in BorrowedValue."
+      ]
+    }
+  ],
+  "output_policies": [],
+  "memory": {
+    "input_access": "read_only",
+    "required_readable_padding_octets": 0,
+    "required_writable_padding_octets": 0,
+    "copy_policy": "per_operation",
+    "allocation_reporting": "unavailable",
+    "peak_memory_reporting": "process_rss"
+  }
+}

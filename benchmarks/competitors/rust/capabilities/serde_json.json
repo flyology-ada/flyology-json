@@ -1,0 +1,137 @@
+{
+  "implementation_id": "serde_json-1.0.151-value",
+  "display_name": "serde_json 1.0.151 Value",
+  "source_id": "serde_json",
+  "source_revision": "registry:1.0.151",
+  "boundary": {
+    "kind": "coarse_rust",
+    "reason": "Rust has no stable native ABI; one whole-document staticlib call parses and traverses the Value.",
+    "retains_input": false,
+    "hidden_io": false,
+    "abi_test": "tests/abi_smoke.c and tests/flyology_json-benchmark_rust_tests.adb"
+  },
+  "build_tracks": {
+    "portable": {
+      "supported": true,
+      "reason": "Cargo release profile without target-cpu=native."
+    },
+    "native": {
+      "supported": true,
+      "reason": "Cargo release profile with RUSTFLAGS=-C target-cpu=native."
+    }
+  },
+  "lanes": [
+    {
+      "lane": "parse_validate",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "No adapter is admitted for this lane."
+      ]
+    },
+    {
+      "lane": "parse_events",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "No adapter is admitted for this lane."
+      ]
+    },
+    {
+      "lane": "parse_incremental",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "The selected API is one-shot."
+      ]
+    },
+    {
+      "lane": "parse_dom",
+      "supported": true,
+      "api": "serde_json::from_slice::<serde_json::Value>",
+      "profile_ids": [
+        "serde_json-value-default"
+      ],
+      "output_policy_ids": [],
+      "observable_result": "Recursive traversal checksum and visited item count are computed inside the timed call.",
+      "limitations": [
+        "The default features omit arbitrary_precision and unbounded_depth.",
+        "Recursive adapter traversal is admitted only for preflighted fixtures of depth at most 256; stack or allocator aborts are not caught.",
+        "The checksum distinguishes signed, unsigned, and floating DOM numbers and follows serde_json Map iteration order.",
+        "The registry crate records upstream VCS commit de8500740cdcabffb9734f503e4889def823cf10."
+      ]
+    },
+    {
+      "lane": "write_stream",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "Writer adapter is deferred."
+      ]
+    },
+    {
+      "lane": "write_dom",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "Writer adapter is deferred."
+      ]
+    },
+    {
+      "lane": "parse_write",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "Writer adapter is deferred."
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "profile_id": "serde_json-value-default",
+      "top_level_scalars": true,
+      "bom": "reject",
+      "malformed_utf8": "reject",
+      "unpaired_surrogates": "reject",
+      "duplicate_names": "last_wins",
+      "comments": false,
+      "trailing_commas": false,
+      "raw_controls": false,
+      "nonstandard_numbers": false,
+      "nonfinite_numbers": false,
+      "number_handling": "lossy_conversion",
+      "maximum_depth": 127,
+      "other_limits": [
+        "Depth 127 was accepted and depth 128 rejected by the maintained adapter test.",
+        "Exact number lexemes are not retained in Value."
+      ]
+    }
+  ],
+  "output_policies": [],
+  "memory": {
+    "input_access": "read_only",
+    "required_readable_padding_octets": 0,
+    "required_writable_padding_octets": 0,
+    "copy_policy": "none",
+    "allocation_reporting": "unavailable",
+    "peak_memory_reporting": "process_rss"
+  }
+}

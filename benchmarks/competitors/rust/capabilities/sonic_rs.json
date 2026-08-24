@@ -1,0 +1,138 @@
+{
+  "implementation_id": "sonic-rs-0.5.8-value",
+  "display_name": "sonic-rs 0.5.8 Value",
+  "source_id": "sonic-rs",
+  "source_revision": "registry:0.5.8",
+  "boundary": {
+    "kind": "coarse_rust",
+    "reason": "Rust has no stable native ABI; one whole-document staticlib call parses and traverses the Value.",
+    "retains_input": false,
+    "hidden_io": false,
+    "abi_test": "tests/abi_smoke.c and tests/flyology_json-benchmark_rust_tests.adb"
+  },
+  "build_tracks": {
+    "portable": {
+      "supported": true,
+      "reason": "Cargo release profile without target-cpu=native."
+    },
+    "native": {
+      "supported": true,
+      "reason": "Cargo release profile with RUSTFLAGS=-C target-cpu=native."
+    }
+  },
+  "lanes": [
+    {
+      "lane": "parse_validate",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "No adapter is admitted for this lane."
+      ]
+    },
+    {
+      "lane": "parse_events",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "No adapter is admitted for this lane."
+      ]
+    },
+    {
+      "lane": "parse_incremental",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "The selected API is one-shot."
+      ]
+    },
+    {
+      "lane": "parse_dom",
+      "supported": true,
+      "api": "sonic_rs::from_slice::<sonic_rs::Value>",
+      "profile_ids": [
+        "sonic-rs-value-default"
+      ],
+      "output_policy_ids": [],
+      "observable_result": "Recursive traversal checksum and visited item count are computed inside the timed call.",
+      "limitations": [
+        "The selected Value fast path is allocating and does not preserve exact numeric lexemes.",
+        "Recursive adapter traversal is admitted only for preflighted fixtures of depth at most 256; stack or allocator aborts are not caught.",
+        "The checksum groups every DOM number into one kind and follows sonic-rs object iteration order.",
+        "The registry crate records upstream VCS commit e339451e37a8f2d3f9b93f155985d31fcbcb115a."
+      ]
+    },
+    {
+      "lane": "write_stream",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "Writer adapter is deferred."
+      ]
+    },
+    {
+      "lane": "write_dom",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "Writer adapter is deferred."
+      ]
+    },
+    {
+      "lane": "parse_write",
+      "supported": false,
+      "api": "",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "",
+      "limitations": [
+        "Writer adapter is deferred."
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "profile_id": "sonic-rs-value-default",
+      "top_level_scalars": true,
+      "bom": "reject",
+      "malformed_utf8": "reject",
+      "unpaired_surrogates": "reject",
+      "duplicate_names": "preserve_all",
+      "comments": false,
+      "trailing_commas": false,
+      "raw_controls": false,
+      "nonstandard_numbers": false,
+      "nonfinite_numbers": false,
+      "number_handling": "lossy_conversion",
+      "maximum_depth": null,
+      "other_limits": [
+        "Duplicate entries remain iterable while name lookup returns the first value.",
+        "The Value fast path accepted the maintained depth-256 fixture; no fixed maximum is claimed.",
+        "Exact number lexemes are not retained in Value."
+      ]
+    }
+  ],
+  "output_policies": [],
+  "memory": {
+    "input_access": "read_only",
+    "required_readable_padding_octets": 0,
+    "required_writable_padding_octets": 0,
+    "copy_policy": "none",
+    "allocation_reporting": "unavailable",
+    "peak_memory_reporting": "process_rss"
+  }
+}

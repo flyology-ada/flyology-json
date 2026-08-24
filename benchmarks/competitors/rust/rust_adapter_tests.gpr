@@ -1,0 +1,26 @@
+project Rust_Adapter_Tests is
+
+   Rust_Adapter_Dir := external ("RUST_ADAPTER_DIR", "target/portable/release");
+
+   for Languages use ("Ada");
+   for Source_Dirs use ("../../../src", "ada", "tests");
+   for Main use ("flyology_json-benchmark_rust_tests.adb");
+   for Object_Dir use "target/ada_obj";
+   for Exec_Dir use "target/ada_bin";
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnatwa", "-gnatwJ", "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Linker is
+      for Switches ("flyology_json-benchmark_rust_tests.adb") use
+        (Rust_Adapter_Dir & "/libflyology_json_rust_bench_adapters.a");
+   end Linker;
+
+end Rust_Adapter_Tests;
