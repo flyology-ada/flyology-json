@@ -29,6 +29,7 @@ procedure Flyology_JSON.Comparison_Benchmark is
 
    use type Ada.Streams.Stream_Element_Count;
    use type Core.Next_Outcome;
+   use type Core.Parser_State;
    use type CPP.Parse_Status;
    use type Flyology_Bench.Iteration_Count;
    use type Interfaces.Unsigned_64;
@@ -328,6 +329,54 @@ procedure Flyology_JSON.Comparison_Benchmark is
       Large_Array  => Make_Large_Array,
       Large_Object => Make_Large_Object];
 
+   type Parser_Access is access all Core.Parser;
+
+   Small_Parser : aliased Core.Parser
+     (Maximum_Depth       => Fixtures (Small_Mixed).Maximum_Depth,
+      Name_Octet_Capacity => Fixtures (Small_Mixed).Name_Octet_Capacity,
+      Name_Capacity       => Fixtures (Small_Mixed).Name_Capacity);
+   Large_Mixed_Parser : aliased Core.Parser
+     (Maximum_Depth       => Fixtures (Large_Mixed).Maximum_Depth,
+      Name_Octet_Capacity => Fixtures (Large_Mixed).Name_Octet_Capacity,
+      Name_Capacity       => Fixtures (Large_Mixed).Name_Capacity);
+   String_Heavy_Parser : aliased Core.Parser
+     (Maximum_Depth       => Fixtures (String_Heavy).Maximum_Depth,
+      Name_Octet_Capacity => Fixtures (String_Heavy).Name_Octet_Capacity,
+      Name_Capacity       => Fixtures (String_Heavy).Name_Capacity);
+   Number_Heavy_Parser : aliased Core.Parser
+     (Maximum_Depth       => Fixtures (Number_Heavy).Maximum_Depth,
+      Name_Octet_Capacity => Fixtures (Number_Heavy).Name_Octet_Capacity,
+      Name_Capacity       => Fixtures (Number_Heavy).Name_Capacity);
+   Long_Mantissa_Parser : aliased Core.Parser
+     (Maximum_Depth       => Fixtures (Long_Mantissa_Numbers).Maximum_Depth,
+      Name_Octet_Capacity => Fixtures (Long_Mantissa_Numbers).Name_Octet_Capacity,
+      Name_Capacity       => Fixtures (Long_Mantissa_Numbers).Name_Capacity);
+   Deep_Nesting_Parser : aliased Core.Parser
+     (Maximum_Depth       => Fixtures (Deep_Nesting).Maximum_Depth,
+      Name_Octet_Capacity => Fixtures (Deep_Nesting).Name_Octet_Capacity,
+      Name_Capacity       => Fixtures (Deep_Nesting).Name_Capacity);
+   Large_Array_Parser : aliased Core.Parser
+     (Maximum_Depth       => Fixtures (Large_Array).Maximum_Depth,
+      Name_Octet_Capacity => Fixtures (Large_Array).Name_Octet_Capacity,
+      Name_Capacity       => Fixtures (Large_Array).Name_Capacity);
+   Large_Object_Parser : aliased Core.Parser
+     (Maximum_Depth       => Fixtures (Large_Object).Maximum_Depth,
+      Name_Octet_Capacity => Fixtures (Large_Object).Name_Octet_Capacity,
+      Name_Capacity       => Fixtures (Large_Object).Name_Capacity);
+
+   --  Retain caller-backed parser storage per fixture across operations just
+   --  as the foreign event adapter retains its reader.  Untimed preflight
+   --  initializes both mechanisms before samples; Reset is constant-time.
+   Reusable_Flyology_Parsers : constant array (Fixture_Kind) of Parser_Access :=
+     [Small_Mixed          => Small_Parser'Access,
+      Large_Mixed          => Large_Mixed_Parser'Access,
+      String_Heavy         => String_Heavy_Parser'Access,
+      Number_Heavy         => Number_Heavy_Parser'Access,
+      Long_Mantissa_Numbers => Long_Mantissa_Parser'Access,
+      Deep_Nesting         => Deep_Nesting_Parser'Access,
+      Large_Array          => Large_Array_Parser'Access,
+      Large_Object         => Large_Object_Parser'Access];
+
    type Signature_Array is array (Fixture_Kind, Implementation) of U64;
 
    --  Regression signatures are tied to the exact fixture constructors and
@@ -451,19 +500,23 @@ procedure Flyology_JSON.Comparison_Benchmark is
          when SIMD_JSON_DOM   => "simd-json");
 
    procedure Parse_Flyology
-     (Item        : Fixture;
+     (Kind        : Fixture_Kind;
       Value       : out U64;
       Event_Count : out U64) is
-      Parser : Core.Parser
-        (Maximum_Depth       => Item.Maximum_Depth,
-         Name_Octet_Capacity => Item.Name_Octet_Capacity,
-         Name_Capacity       => Item.Name_Capacity);
+      Item   : Fixture renames Fixtures (Kind);
+      Parser : Core.Parser renames Reusable_Flyology_Parsers (Kind).all;
       Used   : Count := 0;
       Events : U64 := 0;
    begin
       Value := 0;
       Event_Count := 0;
-      Core.Initialize (Parser);
+      if Core.State (Parser) = Core.Uninitialized then
+         Core.Initialize (Parser);
+      elsif Core.State (Parser) = Core.Completed then
+         Core.Reset (Parser);
+      else
+         raise Program_Error with "reusable Flyology parser is not terminal";
+      end if;
       loop
          declare
             Result : Core.Next_Result;
@@ -480,7 +533,10 @@ procedure Flyology_JSON.Comparison_Benchmark is
                   Empty : Ada.Streams.Stream_Element_Array (1 .. 0);
                begin
                   Core.Next
-                    (Parser, Empty, End_Of_Input => True, Result => Result);
+                    (Parser,
+                     Empty,
+                     End_Of_Input => True,
+                     Result       => Result);
                end;
             end if;
             if Result.Consumed > Item.Data'Length - Used then
@@ -509,15 +565,16 @@ procedure Flyology_JSON.Comparison_Benchmark is
 
    procedure Run_Once
      (Using : Implementation;
-      Item  : Fixture;
+      Kind  : Fixture_Kind;
       Value : out U64) is
+      Item : Fixture renames Fixtures (Kind);
    begin
       case Using is
          when Flyology_Events =>
             declare
                Ignored : U64;
             begin
-               Parse_Flyology (Item, Value, Ignored);
+               Parse_Flyology (Kind, Value, Ignored);
             end;
 
          when Rapidjson_Events =>
@@ -609,7 +666,8 @@ procedure Flyology_JSON.Comparison_Benchmark is
 
    procedure Preflight_Counts
      (Using : Implementation;
-      Item  : Fixture) is
+      Kind  : Fixture_Kind) is
+      Item : Fixture renames Fixtures (Kind);
    begin
       case Using is
          when Flyology_Events =>
@@ -617,7 +675,7 @@ procedure Flyology_JSON.Comparison_Benchmark is
                Value  : U64;
                Events : U64;
             begin
-               Parse_Flyology (Item, Value, Events);
+               Parse_Flyology (Kind, Value, Events);
                if Events /= Item.Flyology_Events then
                   raise Program_Error with "Flyology preflight event count changed";
                end if;
@@ -685,8 +743,8 @@ procedure Flyology_JSON.Comparison_Benchmark is
       Kind  : Fixture_Kind) is
       Value : U64;
    begin
-      Preflight_Counts (Using, Fixtures (Kind));
-      Run_Once (Using, Fixtures (Kind), Value);
+      Preflight_Counts (Using, Kind);
+      Run_Once (Using, Kind, Value);
       if Value /= Expected_Signature (Kind, Using) then
          raise Program_Error with
            "preflight signature changed for " & Implementation_Name (Using)
@@ -704,7 +762,7 @@ procedure Flyology_JSON.Comparison_Benchmark is
    begin
       Value := 0;
       for Iteration in Flyology_Bench.Iteration_Count range 1 .. Iterations loop
-         Run_Once (Current_Implementation, Fixtures (Current_Fixture), One);
+         Run_Once (Current_Implementation, Current_Fixture, One);
          Value := Value + One;
       end loop;
    end Run_Batch;
@@ -752,7 +810,7 @@ begin
                   Value : U64;
                begin
                   Preflight (Using, Kind);
-                  Run_Once (Using, Fixtures (Kind), Value);
+                  Run_Once (Using, Kind, Value);
                   Ada.Text_IO.Put_Line
                     ("implementation=" & Implementation_Name (Using)
                      & " fixture=" & Unbounded.To_String (Fixtures (Kind).Name)
