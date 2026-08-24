@@ -13,6 +13,7 @@ fi
 
 track=$1
 output_directory=$2
+parser_executable="$project_root/benchmarks/bin/flyology_json-parser_benchmark"
 case "$track" in
   portable)
     native_switch=not-applied
@@ -32,6 +33,7 @@ case "$track" in
     exit 2
     ;;
 esac
+comparison_executable="$project_root/benchmarks/comparison_bin/$track/flyology_json-comparison_benchmark"
 
 mkdir -p "$output_directory/provenance/adapters"
 mkdir -p "$output_directory/provenance/build"
@@ -69,7 +71,7 @@ esac
   FLYOLOGY_JSON_BENCH_TUNING="$track" \
     FLYOLOGY_JSON_BENCH_NATIVE_SWITCH="$native_switch" \
     FLYOLOGY_JSON_BENCH_OUTPUT=json \
-    bin/flyology_json-parser_benchmark >"$output_directory/flyology-parser.jsonl"
+    "$parser_executable" >"$output_directory/flyology-parser.jsonl"
 
   if ! FLYOLOGY_JSON_BENCH_TUNING="$track" \
        FLYOLOGY_JSON_BENCH_NATIVE_SWITCH="$native_switch" \
@@ -85,7 +87,7 @@ esac
   cat "$output_directory/comparison-build.log"
   FLYOLOGY_JSON_BENCH_OUTPUT=json \
     FLYOLOGY_JSON_BENCH_FIXTURE_DIRECTORY="$output_directory/fixtures" \
-    "comparison_bin/$track/flyology_json-comparison_benchmark" \
+    "$comparison_executable" \
     >"$output_directory/comparison-summary.jsonl" \
     2>"$output_directory/comparison-skips.txt"
 )
@@ -220,9 +222,9 @@ cp "$project_root/scripts/write-benchmark-manifest.sh" \
   "$output_directory/provenance/"
 cp "$project_root/benchmarks/competitors/rust/test.sh" \
   "$output_directory/provenance/rust-test.sh"
-cp "$project_root/benchmarks/bin/flyology_json-parser-benchmark" \
+cp "$parser_executable" \
   "$output_directory/provenance/build/"
-cp "$project_root/benchmarks/comparison_bin/$track/flyology_json-comparison_benchmark" \
+cp "$comparison_executable" \
   "$output_directory/provenance/build/"
 cp "$project_root/benchmarks/competitors/rust/target/$track/release/libflyology_json_rust_bench_adapters.a" \
   "$output_directory/provenance/build/"
