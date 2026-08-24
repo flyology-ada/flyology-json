@@ -1,0 +1,124 @@
+{
+  "implementation_id": "simdjson-4.6.8-coarse-cpp-dom",
+  "display_name": "simdjson 4.6.8 DOM",
+  "source_id": "simdjson",
+  "source_revision": "17fef66827864c33170996554b7aa0598da080cd",
+  "boundary": {
+    "kind": "coarse_cpp",
+    "reason": "simdjson's DOM parser and traversal API are C++; one extern C call translates the completed observation into a fixed-width record.",
+    "retains_input": false,
+    "hidden_io": false,
+    "abi_test": "test.sh checks C and Ada layout, symbols, nullability, readable padding, ownership, arbitrary Ada bounds, and failure publication."
+  },
+  "build_tracks": {
+    "portable": {
+      "supported": true,
+      "reason": "C++17 with -O3 and no host-specific ISA compile flag; unmodified simdjson runtime ISA dispatch remains enabled."
+    },
+    "native": {
+      "supported": true,
+      "reason": "The portable flags add -mcpu=native on arm64/aarch64 and -march=native elsewhere."
+    }
+  },
+  "lanes": [
+    {
+      "lane": "parse_validate",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["The admitted call constructs and recursively traverses a DOM."]
+    },
+    {
+      "lane": "parse_events",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["The adapter deliberately uses the ordinary owned DOM API rather than presenting DOM traversal as a streaming event API."]
+    },
+    {
+      "lane": "parse_incremental",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["simdjson's complete contiguous padded input is passed without adapter concatenation."]
+    },
+    {
+      "lane": "parse_dom",
+      "supported": true,
+      "api": "flyology_json_bench_simdjson_dom uses dom::parser::parse with realloc_if_needed=false and recursively visits every DOM value.",
+      "profile_ids": ["simdjson-dom-default-v4.6.8"],
+      "output_policy_ids": [],
+      "observable_result": "Checksum over decoded strings, names, value kinds, and container counts plus event, scalar, member-name, and exact input-byte counters.",
+      "limitations": [
+        "The input must be prepared once with 64 readable padding octets; preparation is outside the lane only when the result records it as reusable.",
+        "DOM allocation, number conversion, recursive traversal, and per-call parser cleanup are timed.",
+        "The adapter does not expose number lexemes or error offsets."
+      ]
+    },
+    {
+      "lane": "write_stream",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["No simdjson writer boundary is included."]
+    },
+    {
+      "lane": "write_dom",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["No simdjson writer boundary is included."]
+    },
+    {
+      "lane": "parse_write",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["No combined parse-and-write boundary is included."]
+    }
+  ],
+  "profiles": [
+    {
+      "profile_id": "simdjson-dom-default-v4.6.8",
+      "top_level_scalars": true,
+      "bom": "ignore",
+      "malformed_utf8": "reject",
+      "unpaired_surrogates": "reject",
+      "duplicate_names": "preserve_all",
+      "comments": false,
+      "trailing_commas": false,
+      "raw_controls": false,
+      "nonstandard_numbers": false,
+      "nonfinite_numbers": false,
+      "number_handling": "implementation_specific",
+      "maximum_depth": 1023,
+      "other_limits": [
+        "The upstream parser's DEFAULT_MAX_DEPTH is 1024; its depth guard rejects when the internal depth reaches that value, so 1023 nested arrays around a scalar are accepted and 1024 are rejected.",
+        "Input length and parser allocation are bounded by size_t, address space, and available allocation.",
+        "A zero-length document is rejected.",
+        "The benchmark observation groups all numeric DOM categories and does not preserve spelling."
+      ]
+    }
+  ],
+  "output_policies": [],
+  "memory": {
+    "input_access": "read_only",
+    "required_readable_padding_octets": 64,
+    "required_writable_padding_octets": 0,
+    "copy_policy": "reusable_preparation",
+    "allocation_reporting": "unavailable",
+    "peak_memory_reporting": "process_rss"
+  }
+}
