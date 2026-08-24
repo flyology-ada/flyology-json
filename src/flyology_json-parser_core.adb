@@ -4,6 +4,8 @@ package body Flyology_JSON.Parser_Core is
    use type Ada.Streams.Stream_Element_Count;
    use type Byte_Offset;
    use type Parser_Numbers.Transition_Result;
+   use type Parser_Duplicates.Name_Classification;
+   use type Parser_Duplicates.Operation_Status;
    use type Parser_UTF8.Blame_Position;
    use type Parser_UTF8.Feed_Status;
    use type Interfaces.Unsigned_32;
@@ -109,6 +111,43 @@ package body Flyology_JSON.Parser_Core is
       Result.Item := Empty_Event;
       Result.Diagnostic := Self.Last_Diagnostic;
    end Fail;
+
+   procedure Retain_Name_Octets
+     (Self   : in out Parser;
+      Octets : Ada.Streams.Stream_Element_Array;
+      Code   : out Error_Code) is
+      Status : Parser_Duplicates.Operation_Status;
+   begin
+      Parser_Duplicates.Append_Octets (Self.Duplicate_Names, Octets, Status);
+      Code :=
+        (case Status is
+            when Parser_Duplicates.Operation_Succeeded       => No_Error,
+            when Parser_Duplicates.Name_Storage_Exhausted    => Name_Storage_Exhausted,
+            when Parser_Duplicates.Index_Storage_Exhausted   => Duplicate_Index_Exhausted,
+            when Parser_Duplicates.Invalid_Operation_Order   => Invalid_State);
+   end Retain_Name_Octets;
+
+   procedure Retain_Name_Scalar
+     (Self   : in out Parser;
+      Scalar : Inline_Scalar;
+      Code   : out Error_Code) is
+      Octets : Ada.Streams.Stream_Element_Array
+        (1 .. Ada.Streams.Stream_Element_Offset (Scalar.Length));
+   begin
+      for Position in 1 .. Scalar.Length loop
+         Octets (Ada.Streams.Stream_Element_Offset (Position)) := Scalar.Octets (Position);
+      end loop;
+      Retain_Name_Octets (Self, Octets, Code);
+   end Retain_Name_Scalar;
+
+   procedure Defer_Failure
+     (Self   : in out Parser;
+      Code   : Error_Code;
+      Offset : Byte_Offset) is
+   begin
+      Self.Current_State := Failure_Pending;
+      Self.Last_Diagnostic := (Code => Code, Offset => Offset);
+   end Defer_Failure;
 
    function Consume_One
      (Self     : in out Parser;
@@ -350,9 +389,23 @@ package body Flyology_JSON.Parser_Core is
       Result   : in out Next_Result;
       Consumed : in out Count) is
       Start : constant Byte_Offset := Self.Next_Offset;
+      Status : Parser_Duplicates.Operation_Status;
    begin
       if Token = String_Token then
          Begin_Scalar_Value (Self);
+      else
+         Parser_Duplicates.Begin_Name
+           (Self.Duplicate_Names, Self.Stack (Self.Depth).Duplicate_Context, Status);
+         if Status /= Parser_Duplicates.Operation_Succeeded then
+            Fail
+              (Self,
+               Result,
+               (if Status = Parser_Duplicates.Index_Storage_Exhausted
+                then Duplicate_Index_Exhausted
+                else Invalid_State),
+               Start);
+            return;
+         end if;
       end if;
 
       if not Consume_One (Self, Consumed, Result) then
@@ -382,9 +435,35 @@ package body Flyology_JSON.Parser_Core is
       Consumed : in out Count) is
       Start : constant Byte_Offset := Self.Next_Offset;
       Token : constant Token_Kind := Self.Token;
+      Status : Parser_Duplicates.Operation_Status;
+      Classification : Parser_Duplicates.Name_Classification;
    begin
       if not Consume_One (Self, Consumed, Result) then
          return;
+      end if;
+
+      if Token = Name_Token then
+         Parser_Duplicates.Complete_Name
+           (Self.Duplicate_Names,
+            Self.Stack (Self.Depth).Duplicate_Context,
+            Status,
+            Classification);
+         if Status /= Parser_Duplicates.Operation_Succeeded then
+            Fail
+              (Self,
+               Result,
+               (if Status = Parser_Duplicates.Index_Storage_Exhausted
+                then Duplicate_Index_Exhausted
+                elsif Status = Parser_Duplicates.Name_Storage_Exhausted
+                then Name_Storage_Exhausted
+                else Invalid_State),
+               Self.Token_Start);
+            return;
+         elsif Classification = Parser_Duplicates.Duplicate_Name then
+            Fail (Self, Result, Duplicate_Name, Self.Token_Start);
+            return;
+         end if;
+
       end if;
 
       Self.Token := No_Token;
@@ -404,7 +483,16 @@ package body Flyology_JSON.Parser_Core is
          Raw_Length    => 1);
    end Finish_Text;
 
-   procedure Process_Pending_UTF8
+   generic
+      Track_Name : Boolean;
+   procedure Process_Pending_UTF8_Specialized
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Consumed     : in out Count;
+      Result       : in out Next_Result);
+
+   procedure Process_Pending_UTF8_Specialized
      (Self         : in out Parser;
       Input        : Ada.Streams.Stream_Element_Array;
       End_Of_Input : Boolean;
@@ -415,6 +503,7 @@ package body Flyology_JSON.Parser_Core is
       Candidate    : Parser_UTF8.Decoder;
       First_Count  : constant Count := Consumed;
       First_Offset : constant Byte_Offset := Self.Next_Offset;
+      Retention_Error : Error_Code;
    begin
       while Parser_UTF8.Has_Pending_Octets (Self.UTF8) and then Consumed < Input'Length loop
          Value := Input_Octet (Input, Consumed);
@@ -448,6 +537,23 @@ package body Flyology_JSON.Parser_Core is
          end if;
 
          if Feed.Status = Parser_UTF8.Scalar_Ready then
+            if Track_Name then
+               Retain_Name_Scalar
+                 (Self,
+                  (Length => Feed.Value.Length, Octets => Feed.Value.Octets),
+                  Retention_Error);
+               if Retention_Error /= No_Error then
+                  Defer_Failure (Self, Retention_Error, Self.UTF8_Lead_Offset);
+                  Emit_Raw_Only_Text
+                    (Self,
+                     Result,
+                     First_Offset,
+                     Self.Next_Offset - First_Offset,
+                     First_Count,
+                     Consumed - First_Count);
+                  return;
+               end if;
+            end if;
             Emit_Inline_Text
               (Self,
                Result,
@@ -477,9 +583,24 @@ package body Flyology_JSON.Parser_Core is
             Result.Outcome := Need_Input;
          end if;
       end if;
-   end Process_Pending_UTF8;
+   end Process_Pending_UTF8_Specialized;
 
-   procedure Process_Text
+   procedure Process_Pending_Name_UTF8 is new Process_Pending_UTF8_Specialized
+     (Track_Name => True);
+
+   procedure Process_Pending_String_UTF8 is new Process_Pending_UTF8_Specialized
+     (Track_Name => False);
+
+   generic
+      Track_Name : Boolean;
+   procedure Process_Text_Specialized
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Consumed     : in out Count;
+      Result       : in out Next_Result);
+
+   procedure Process_Text_Specialized
      (Self         : in out Parser;
       Input        : Ada.Streams.Stream_Element_Array;
       End_Of_Input : Boolean;
@@ -499,9 +620,68 @@ package body Flyology_JSON.Parser_Core is
       Scalar_First_Offset : Byte_Offset;
       Piece_First_Count   : constant Count := Consumed;
       Piece_First_Offset  : constant Byte_Offset := Self.Next_Offset;
+      Name_Octets_Left    : Natural :=
+        (if Track_Name then Parser_Duplicates.Available_Name_Octets (Self.Duplicate_Names) else 0);
+      Retention_Error     : Error_Code;
+
+      procedure Emit_Complete_Raw_Span is
+         First_Index : constant Ada.Streams.Stream_Element_Offset :=
+           Input'First + Ada.Streams.Stream_Element_Offset (First_Count);
+         Last_Index  : constant Ada.Streams.Stream_Element_Offset :=
+           Input'First + Ada.Streams.Stream_Element_Offset (Complete_Count) - 1;
+      begin
+         if Track_Name then
+            Retain_Name_Octets (Self, Input (First_Index .. Last_Index), Retention_Error);
+            if Retention_Error /= No_Error then
+               Fail (Self, Result, Invalid_State, First_Offset);
+               return;
+            end if;
+         end if;
+         Emit_Raw_Text
+           (Self,
+            Result,
+            First_Offset,
+            Complete_Offset - First_Offset,
+            First_Count,
+            Complete_Count - First_Count);
+      end Emit_Complete_Raw_Span;
+
+      procedure Emit_Completed_Scalar
+        (Scalar        : Inline_Scalar;
+         Decoded_First : Byte_Offset) is
+      begin
+         if Track_Name then
+            Retain_Name_Scalar (Self, Scalar, Retention_Error);
+            if Retention_Error /= No_Error then
+               Defer_Failure (Self, Retention_Error, Decoded_First);
+               Emit_Raw_Only_Text
+                 (Self,
+                  Result,
+                  Piece_First_Offset,
+                  Self.Next_Offset - Piece_First_Offset,
+                  Piece_First_Count,
+                  Consumed - Piece_First_Count);
+               return;
+            end if;
+         end if;
+         Emit_Inline_Text
+           (Self,
+            Result,
+            Piece_First_Offset,
+            Self.Next_Offset - Piece_First_Offset,
+            Piece_First_Count,
+            Consumed - Piece_First_Count,
+            Decoded_First,
+            Self.Next_Offset - Decoded_First,
+            Scalar);
+      end Emit_Completed_Scalar;
    begin
       if Self.Text_State = Text_Content and then Parser_UTF8.Has_Pending_Octets (Self.UTF8) then
-         Process_Pending_UTF8 (Self, Input, End_Of_Input, Consumed, Result);
+         if Track_Name then
+            Process_Pending_Name_UTF8 (Self, Input, End_Of_Input, Consumed, Result);
+         else
+            Process_Pending_String_UTF8 (Self, Input, End_Of_Input, Consumed, Result);
+         end if;
          return;
       end if;
 
@@ -521,8 +701,22 @@ package body Flyology_JSON.Parser_Core is
                  and then (Value = Quote or else Value = Reverse_Solidus or else Value < 16#20#);
 
                if Value <= 16#7F# and then not Parser_UTF8.Has_Pending_Octets (Self.UTF8) then
+                  Scalar_First_Offset := Self.Next_Offset;
+                  if Track_Name and then Name_Octets_Left = 0 then
+                     if Complete_Count > First_Count then
+                        Emit_Complete_Raw_Span;
+                     elsif Consume_One (Self, Consumed, Result) then
+                        Defer_Failure (Self, Name_Storage_Exhausted, Scalar_First_Offset);
+                        Emit_Raw_Only_Text
+                          (Self, Result, First_Offset, 1, First_Count, 1);
+                     end if;
+                     return;
+                  end if;
                   if not Consume_One (Self, Consumed, Result) then
                      return;
+                  end if;
+                  if Track_Name then
+                     Name_Octets_Left := Name_Octets_Left - 1;
                   end if;
                   Complete_Count := Consumed;
                   Complete_Offset := Self.Next_Offset;
@@ -547,13 +741,7 @@ package body Flyology_JSON.Parser_Core is
                         Self.Next_Offset := Scalar_First_Offset;
                         Result.Consumed := Consumed;
                         Parser_UTF8.Reset (Self.UTF8);
-                        Emit_Raw_Text
-                          (Self,
-                           Result,
-                           First_Offset,
-                           Complete_Offset - First_Offset,
-                           First_Count,
-                           Complete_Count - First_Count);
+                        Emit_Complete_Raw_Span;
                      elsif Consumed > First_Count then
                         Emit_Raw_Only_Text
                           (Self,
@@ -580,6 +768,29 @@ package body Flyology_JSON.Parser_Core is
                   end if;
 
                   if Feed.Status = Parser_UTF8.Scalar_Ready then
+                     if Track_Name and then Feed.Value.Length > Name_Octets_Left then
+                        if Complete_Count > First_Count then
+                           Consumed := Scalar_First_Count;
+                           Self.Next_Offset := Scalar_First_Offset;
+                           Result.Consumed := Consumed;
+                           Parser_UTF8.Reset (Self.UTF8);
+                           Emit_Complete_Raw_Span;
+                        else
+                           Defer_Failure
+                             (Self, Name_Storage_Exhausted, Scalar_First_Offset);
+                           Emit_Raw_Only_Text
+                             (Self,
+                              Result,
+                              First_Offset,
+                              Self.Next_Offset - First_Offset,
+                              First_Count,
+                              Consumed - First_Count);
+                        end if;
+                        return;
+                     end if;
+                     if Track_Name then
+                        Name_Octets_Left := Name_Octets_Left - Feed.Value.Length;
+                     end if;
                      Complete_Count := Consumed;
                      Complete_Offset := Self.Next_Offset;
                   end if;
@@ -596,13 +807,7 @@ package body Flyology_JSON.Parser_Core is
                   Result.Consumed := Consumed;
                   Parser_UTF8.Reset (Self.UTF8);
                end if;
-               Emit_Raw_Text
-                 (Self,
-                  Result,
-                  First_Offset,
-                  Complete_Offset - First_Offset,
-                  First_Count,
-                  Complete_Count - First_Count);
+               Emit_Complete_Raw_Span;
                return;
             end if;
 
@@ -706,16 +911,7 @@ package body Flyology_JSON.Parser_Core is
                return;
             end if;
             Self.Text_State := Text_Content;
-            Emit_Inline_Text
-              (Self,
-               Result,
-               Piece_First_Offset,
-               Self.Next_Offset - Piece_First_Offset,
-               Piece_First_Count,
-               Consumed - Piece_First_Count,
-               Self.Text_Escape_Start,
-               Self.Next_Offset - Self.Text_Escape_Start,
-               Encode_UTF8 (Code_Point));
+            Emit_Completed_Scalar (Encode_UTF8 (Code_Point), Self.Text_Escape_Start);
             return;
 
          elsif Self.Text_State in Text_Unicode_Digits | Text_Low_Digits then
@@ -802,16 +998,7 @@ package body Flyology_JSON.Parser_Core is
                   goto Continue_Text;
                else
                   Self.Text_State := Text_Content;
-                  Emit_Inline_Text
-                    (Self,
-                     Result,
-                     Piece_First_Offset,
-                     Self.Next_Offset - Piece_First_Offset,
-                     Piece_First_Count,
-                     Consumed - Piece_First_Count,
-                     Self.Text_Escape_Start,
-                     Self.Next_Offset - Self.Text_Escape_Start,
-                     Encode_UTF8 (Code_Point));
+                  Emit_Completed_Scalar (Encode_UTF8 (Code_Point), Self.Text_Escape_Start);
                   return;
                end if;
             else
@@ -820,16 +1007,7 @@ package body Flyology_JSON.Parser_Core is
                  + (Self.Text_High_Surrogate - 16#D800#) * 16#400#
                  + (Code_Point - 16#DC00#);
                Self.Text_State := Text_Content;
-               Emit_Inline_Text
-                 (Self,
-                  Result,
-                  Piece_First_Offset,
-                  Self.Next_Offset - Piece_First_Offset,
-                  Piece_First_Count,
-                  Consumed - Piece_First_Count,
-                  Self.Text_High_Start,
-                  Self.Next_Offset - Self.Text_High_Start,
-                  Encode_UTF8 (Code_Point));
+               Emit_Completed_Scalar (Encode_UTF8 (Code_Point), Self.Text_High_Start);
                return;
             end if;
 
@@ -916,7 +1094,11 @@ package body Flyology_JSON.Parser_Core is
          <<Continue_Text>>
          null;
       end loop;
-   end Process_Text;
+   end Process_Text_Specialized;
+
+   procedure Process_Name_Text is new Process_Text_Specialized (Track_Name => True);
+
+   procedure Process_String_Text is new Process_Text_Specialized (Track_Name => False);
 
    procedure Process_Literal
      (Self         : in out Parser;
@@ -1098,7 +1280,11 @@ package body Flyology_JSON.Parser_Core is
       end if;
 
       Self.Depth := Self.Depth + 1;
-      Self.Stack (Self.Depth) := (Phase => Phase);
+      Self.Stack (Self.Depth) := (Phase => Phase, Duplicate_Context => <>);
+      if Kind = Object_Container then
+         Parser_Duplicates.Begin_Object
+           (Self.Duplicate_Names, Self.Stack (Self.Depth).Duplicate_Context);
+      end if;
       Set_Event
         (Result,
          (if Kind = Array_Container then Array_Begin else Object_Begin),
@@ -1120,6 +1306,10 @@ package body Flyology_JSON.Parser_Core is
          return;
       end if;
 
+      if Kind = Object_Container then
+         Parser_Duplicates.End_Object
+           (Self.Duplicate_Names, Self.Stack (Self.Depth).Duplicate_Context);
+      end if;
       Self.Depth := Self.Depth - 1;
       if Self.Depth = 0 then
          Self.Root_Complete := True;
@@ -1154,6 +1344,7 @@ package body Flyology_JSON.Parser_Core is
          Self.Literal_Can_Slice := False;
          Parser_Numbers.Reset (Self.Number);
          Parser_UTF8.Reset (Self.UTF8);
+         Parser_Duplicates.Reset (Self.Duplicate_Names);
       end if;
    end Initialize;
 
@@ -1171,6 +1362,11 @@ package body Flyology_JSON.Parser_Core is
          Self.Current_State := Active;
          Set_Event (Result, Document_Begin, Self.Next_Offset, 0);
          return;
+      elsif Self.Current_State = Failure_Pending then
+         Self.Current_State := Failed;
+         Result.Outcome := Parse_Failed;
+         Result.Diagnostic := Self.Last_Diagnostic;
+         return;
       elsif Self.Current_State /= Active then
          Result.Outcome := Call_Rejected;
          Result.Diagnostic := (Code => Invalid_State, Offset => Self.Next_Offset);
@@ -1185,8 +1381,12 @@ package body Flyology_JSON.Parser_Core is
          Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
          Result.Consumed := Consumed;
          return;
-      elsif Self.Token in Name_Token | String_Token then
-         Process_Text (Self, Input, End_Of_Input, Consumed, Result);
+      elsif Self.Token = Name_Token then
+         Process_Name_Text (Self, Input, End_Of_Input, Consumed, Result);
+         Result.Consumed := Consumed;
+         return;
+      elsif Self.Token = String_Token then
+         Process_String_Text (Self, Input, End_Of_Input, Consumed, Result);
          Result.Consumed := Consumed;
          return;
       end if;
@@ -1374,6 +1574,8 @@ package body Flyology_JSON.Parser_Core is
       case Self.Current_State is
          when Uninitialized | Aborted =>
             null;
+         when Failure_Pending =>
+            Self.Current_State := Failed;
          when others =>
             Self.Current_State := Aborted;
       end case;
@@ -1381,7 +1583,7 @@ package body Flyology_JSON.Parser_Core is
 
    procedure Reset (Self : in out Parser) is
    begin
-      if Self.Current_State in Completed | Failed | Aborted then
+      if Self.Current_State in Failure_Pending | Completed | Failed | Aborted then
          Self.Current_State := Uninitialized;
          Initialize (Self);
       end if;

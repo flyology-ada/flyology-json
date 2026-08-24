@@ -25,6 +25,8 @@ procedure Flyology_JSON.Parser_Core_Tests is
    --  Fixture/campaign storage only; this is not a parser capacity or API default.
    Test_Text_Capacity     : constant := 8_192;
    Test_Fragment_Capacity : constant := 64;
+   Test_Name_Octet_Capacity : constant := Test_Text_Capacity;
+   Test_Name_Capacity       : constant := 256;
 
    type Fragment_Observation is record
       Kind           : Core.Event_Kind := Core.String_Fragment;
@@ -298,7 +300,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Split         : Natural;
       Maximum_Depth : Natural := 8) return Observation
    is
-      Parser : Core.Parser (Maximum_Depth);
+      Parser : Core.Parser (Maximum_Depth, Test_Name_Octet_Capacity, Test_Name_Capacity);
       Seen   : Observation;
    begin
       Core.Initialize (Parser);
@@ -326,7 +328,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
    end Parse;
 
    function Parse_One_Byte (Text : String) return Observation is
-      Parser : Core.Parser (8);
+      Parser : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity);
       Seen   : Observation;
    begin
       Core.Initialize (Parser);
@@ -377,7 +379,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
    is
       --  Campaign data only.  These LCG coefficients do not affect parser behavior.
       Generator : Interfaces.Unsigned_32 := Seed;
-      Parser    : Core.Parser (8);
+      Parser    : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity);
       Seen      : Observation;
       Position  : Natural := 0;
    begin
@@ -424,7 +426,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
    end Parse_Randomized;
 
    function Parse_Partition (Text : String; Boundaries : Interfaces.Unsigned_32) return Observation is
-      Parser      : Core.Parser (8);
+      Parser      : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity);
       Seen        : Observation;
       Chunk_First : Natural := 0;
    begin
@@ -582,6 +584,33 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end loop;
    end Check_Invalid;
 
+   procedure Check_Duplicate
+     (Text    : String;
+      At_Byte : Core.Byte_Offset;
+      Expected_Name_Begins : Natural := 2;
+      Expected_Name_Ends   : Natural := 1) is
+      procedure Check_Observation (Seen : Observation; Schedule : String) is
+      begin
+         Check (Seen.Outcome = Core.Parse_Failed, Schedule & " accepted a duplicate name");
+         Check (Seen.Diagnostic.Code = Core.Duplicate_Name, Schedule & " changed duplicate status");
+         Check (Seen.Diagnostic.Offset = At_Byte, Schedule & " changed duplicate offset");
+         Check
+           (Seen.Events (Core.Name_Begin) = Expected_Name_Begins,
+            Schedule & " changed provisional name begins");
+         Check
+           (Seen.Events (Core.Name_End) = Expected_Name_Ends,
+            Schedule & "published the rejecting Name_End");
+      end Check_Observation;
+   begin
+      for Split in 0 .. Text'Length loop
+         Check_Observation (Parse (Text, Split), "duplicate split" & Natural'Image (Split));
+      end loop;
+      Check_Observation (Parse_One_Byte (Text), "duplicate one-byte schedule");
+      for Seed in Interfaces.Unsigned_32 range 1 .. 8 loop
+         Check_Observation (Parse_Randomized (Text, Seed), "duplicate random schedule" & Seed'Image);
+      end loop;
+   end Check_Duplicate;
+
    procedure Check_Malformed_Prefix_Invariance
      (Text             : String;
       Code             : Core.Error_Code;
@@ -681,6 +710,8 @@ procedure Flyology_JSON.Parser_Core_Tests is
    Reverse_Solidus : constant Character := '\';
    Euro            : constant String :=
      Character'Val (16#E2#) & Character'Val (16#82#) & Character'Val (16#AC#);
+   E_Acute         : constant String := Character'Val (16#C3#) & Character'Val (16#A9#);
+   Combining_Acute : constant String := Character'Val (16#CC#) & Character'Val (16#81#);
    Grinning_Face : constant String :=
      Character'Val (16#F0#)
      & Character'Val (16#9F#)
@@ -781,7 +812,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Input : constant Ada.Streams.Stream_Element_Array := To_Input ("x", 17);
    begin
       declare
-         Parser : Core.Parser (1);
+         Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity);
       begin
          Core.Abort_Document (Parser);
          Check (Core.State (Parser) = Core.Uninitialized, "uninitialized abort was not a no-op");
@@ -795,7 +826,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser : Core.Parser (1);
+         Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity);
          Result : Core.Next_Result;
       begin
          Core.Initialize (Parser);
@@ -806,7 +837,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser  : Core.Parser (1);
+         Parser  : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity);
          Seen    : Observation;
          Result  : Core.Next_Result;
          Primary : Core.Diagnostic;
@@ -830,7 +861,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser : Core.Parser (1);
+         Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity);
          Seen   : Observation;
          Result : Core.Next_Result;
       begin
@@ -851,6 +882,500 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
    end Check_Lifecycle;
 
+   procedure Check_Duplicate_Capacities is
+      procedure Check_With_Capacities
+        (Text          : String;
+         Name_Octets   : Natural;
+         Names         : Natural;
+         Expected      : Core.Next_Outcome;
+         Expected_Code : Core.Error_Code := Core.No_Error;
+         Expected_At   : Core.Byte_Offset := 0;
+         Expected_Name_Ends : Natural := 0;
+         Check_Prefix       : Boolean := False;
+         Expected_Raw       : String := "";
+         Expected_Decoded   : String := "") is
+         procedure Check_Seen (Seen : Observation; Schedule : String) is
+         begin
+            Check (Seen.Outcome = Expected, Schedule & " changed capacity outcome");
+            if Expected = Core.Parse_Failed then
+               Check (Seen.Diagnostic.Code = Expected_Code, Schedule & " changed capacity status");
+               Check (Seen.Diagnostic.Offset = Expected_At, Schedule & " changed capacity offset");
+               Check
+                 (Seen.Events (Core.Name_End) = Expected_Name_Ends,
+                  Schedule & " published a rejecting Name_End");
+            end if;
+            if Check_Prefix then
+               Check
+                 (Seen.Raw_Prefix (1 .. Seen.Raw_Prefix_Length) = Expected_Raw,
+                  Schedule
+                  & " changed the capacity-denied raw prefix; expected length"
+                  & Natural'Image (Expected_Raw'Length)
+                  & ", observed"
+                  & Natural'Image (Seen.Raw_Prefix_Length));
+               Check
+                 (Seen.Name_Text (1 .. Seen.Name_Length) = Expected_Decoded,
+                  Schedule
+                  & " changed the capacity-denied decoded prefix; expected length"
+                  & Natural'Image (Expected_Decoded'Length)
+                  & ", observed"
+                  & Natural'Image (Seen.Name_Length));
+            end if;
+         end Check_Seen;
+      begin
+         for Split in 0 .. Text'Length loop
+            declare
+               Parser : Core.Parser (4, Name_Octets, Names);
+               Seen   : Observation;
+            begin
+               Core.Initialize (Parser);
+               if Split > 0 then
+                  Drain
+                    (Parser,
+                     To_Input (Text (Text'First .. Text'First + Split - 1), -41),
+                     0,
+                     False,
+                     Seen);
+               end if;
+               if Split = 0 or else Seen.Outcome = Core.Need_Input then
+                  Drain
+                    (Parser,
+                     To_Input (Text (Text'First + Split .. Text'Last), 37),
+                     Core.Byte_Offset (Split),
+                     True,
+                     Seen);
+               end if;
+               Check_Seen (Seen, "capacity split" & Natural'Image (Split));
+            end;
+         end loop;
+
+         declare
+            Parser : Core.Parser (4, Name_Octets, Names);
+            Seen   : Observation;
+         begin
+            Core.Initialize (Parser);
+            for Position in 0 .. Text'Length - 1 loop
+               Drain
+                 (Parser,
+                  To_Input
+                    (Text (Text'First + Position .. Text'First + Position),
+                     Offset (-19 + Position)),
+                  Core.Byte_Offset (Position),
+                  Position = Text'Length - 1,
+                  Seen);
+               exit when Seen.Outcome /= Core.Need_Input;
+            end loop;
+            Check_Seen (Seen, "capacity one-byte schedule");
+         end;
+
+         for Seed in Interfaces.Unsigned_32 range 1 .. 4 loop
+            declare
+               Parser    : Core.Parser (4, Name_Octets, Names);
+               Seen      : Observation;
+               Generator : Interfaces.Unsigned_32 := Seed;
+               Position  : Natural := 0;
+            begin
+               Core.Initialize (Parser);
+               while Position < Text'Length loop
+                  Generator := Generator * 1_664_525 + 1_013_904_223;
+                  declare
+                     Length : constant Natural :=
+                       Natural'Min (Text'Length - Position, Natural (Generator mod 5) + 1);
+                  begin
+                     Drain
+                       (Parser,
+                        To_Input
+                          (Text (Text'First + Position .. Text'First + Position + Length - 1),
+                           Offset (23 + Position)),
+                        Core.Byte_Offset (Position),
+                        Position + Length = Text'Length,
+                        Seen);
+                     Position := Position + Length;
+                  end;
+                  exit when Seen.Outcome /= Core.Need_Input;
+               end loop;
+               Check_Seen (Seen, "capacity random schedule" & Seed'Image);
+            end;
+         end loop;
+      end Check_With_Capacities;
+
+      procedure Check_Pending_Failure_Transition is
+         Text  : constant String := "{" & Quote & "ab" & Quote & ":0}";
+         Input : constant Ada.Streams.Stream_Element_Array := To_Input (Text, -33);
+
+         procedure Next_On_Suffix
+           (Parser      : in out Core.Parser;
+            Used        : in out Count;
+            Final_Input : Boolean;
+            Result      : out Core.Next_Result) is
+         begin
+            if Used < Input'Length then
+               Core.Next
+                 (Parser,
+                  Input (Input'First + Offset (Used) .. Input'Last),
+                  Final_Input,
+                  Result);
+            else
+               declare
+                  Empty : Ada.Streams.Stream_Element_Array (19 .. 18);
+               begin
+                  Core.Next (Parser, Empty, Final_Input, Result);
+               end;
+            end if;
+            Used := Used + Result.Consumed;
+         end Next_On_Suffix;
+
+         procedure Reach_Accepted_Prefix
+           (Parser : in out Core.Parser;
+            Used   : in out Count;
+            Result : out Core.Next_Result) is
+         begin
+            Core.Initialize (Parser);
+            Next_On_Suffix (Parser, Used, False, Result);
+            Check (Result.Item.Kind = Core.Document_Begin, "pending setup missed document begin");
+            Next_On_Suffix (Parser, Used, False, Result);
+            Check (Result.Item.Kind = Core.Object_Begin, "pending setup missed object begin");
+            Next_On_Suffix (Parser, Used, False, Result);
+            Check (Result.Item.Kind = Core.Name_Begin, "pending setup missed name begin");
+            Next_On_Suffix (Parser, Used, False, Result);
+            Check (Result.Outcome = Core.Event_Ready, "accepted name prefix was not an event");
+            Check (Result.Item.Kind = Core.Name_Fragment, "accepted name prefix changed kind");
+            Check
+              (Result.Item.Decoded_Kind = Core.Decoded_Is_Raw_Range,
+               "accepted name prefix was not decoded");
+            Check (Result.Item.Source = (First => 2, Octet_Length => 1), "accepted prefix moved");
+            Check (Core.State (Parser) = Core.Active, "accepted prefix changed parser state");
+         end Reach_Accepted_Prefix;
+
+         procedure Reach_Pending
+           (Parser : in out Core.Parser;
+            Used   : in out Count;
+            Result : out Core.Next_Result) is
+         begin
+            Reach_Accepted_Prefix (Parser, Used, Result);
+            Next_On_Suffix (Parser, Used, False, Result);
+            Check (Result.Outcome = Core.Event_Ready, "denied scalar did not expose raw provenance");
+            Check (Result.Item.Kind = Core.Name_Fragment, "denied scalar changed event kind");
+            Check
+              (Result.Item.Decoded_Kind = Core.No_Decoded_Fragment,
+               "denied scalar was incorrectly decoded");
+            Check (Result.Item.Source = (First => 3, Octet_Length => 1), "denied scalar moved");
+            Check (Core.State (Parser) = Core.Failure_Pending, "denial was not latched");
+            Check
+              (Core.Terminal_Diagnostic (Parser)
+                 = (Code => Core.Name_Storage_Exhausted, Offset => 3),
+               "pending denial changed its diagnostic");
+         end Reach_Pending;
+      begin
+         declare
+            Parser : Core.Parser (4, 1, 1);
+            Used   : Count := 0;
+            Result : Core.Next_Result;
+         begin
+            Reach_Pending (Parser, Used, Result);
+            Next_On_Suffix (Parser, Used, True, Result);
+            Check (Result.Outcome = Core.Parse_Failed, "pending denial was not reported");
+            Check (Result.Consumed = 0, "pending denial consumed following input");
+            Check (Core.State (Parser) = Core.Failed, "reported denial did not become terminal");
+         end;
+
+         declare
+            Parser : Core.Parser (4, 1, 1);
+            Used   : Count := 0;
+            Result : Core.Next_Result;
+         begin
+            Reach_Accepted_Prefix (Parser, Used, Result);
+            Core.Abort_Document (Parser);
+            Check (Core.State (Parser) = Core.Aborted, "active prefix abort did not cancel");
+         end;
+
+         declare
+            Parser  : Core.Parser (4, 1, 1);
+            Used    : Count := 0;
+            Result  : Core.Next_Result;
+            Primary : Core.Diagnostic;
+         begin
+            Reach_Pending (Parser, Used, Result);
+            Primary := Core.Terminal_Diagnostic (Parser);
+            Core.Abort_Document (Parser);
+            Check (Core.State (Parser) = Core.Failed, "pending abort hid the primary failure");
+            Check
+              (Core.Terminal_Diagnostic (Parser) = Primary,
+               "pending abort replaced the primary failure");
+         end;
+
+         declare
+            Parser : Core.Parser (4, 1, 1);
+            Used   : Count := 0;
+            Result : Core.Next_Result;
+            Seen   : Observation;
+         begin
+            Reach_Pending (Parser, Used, Result);
+            Core.Reset (Parser);
+            Check (Core.State (Parser) = Core.Ready, "pending denial could not reset");
+            Drain (Parser, To_Input ("{}", 71), 0, True, Seen);
+            Check (Seen.Outcome = Core.Document_Complete, "pending reset did not permit reuse");
+         end;
+      end Check_Pending_Failure_Transition;
+
+      procedure Check_Short_Escape_Denial_Event is
+         Text   : constant String :=
+           "{" & Quote & Reverse_Solidus & Quote & Quote & ":0}";
+         Input  : constant Ada.Streams.Stream_Element_Array := To_Input (Text, -57);
+         Parser : Core.Parser (4, 0, 1);
+         Used   : Count := 0;
+         Result : Core.Next_Result;
+
+         procedure Expect (Kind : Core.Event_Kind) is
+         begin
+            Core.Next
+              (Parser,
+               Input (Input'First + Offset (Used) .. Input'Last),
+               False,
+               Result);
+            Used := Used + Result.Consumed;
+            Check (Result.Outcome = Core.Event_Ready, "short escape setup did not emit an event");
+            Check (Result.Item.Kind = Kind, "short escape setup changed event order");
+         end Expect;
+      begin
+         Core.Initialize (Parser);
+         Expect (Core.Document_Begin);
+         Expect (Core.Object_Begin);
+         Expect (Core.Name_Begin);
+
+         Core.Next
+           (Parser,
+            Input (Input'First + Offset (Used) .. Input'Last),
+            False,
+            Result);
+         Check (Result.Outcome = Core.Event_Ready, "short escape denial did not emit raw provenance");
+         Check (Result.Item.Kind = Core.Name_Fragment, "short escape denial changed event kind");
+         Check
+           (Result.Item.Decoded_Kind = Core.No_Decoded_Fragment,
+            "short escape denial exposed decoded data");
+         Check
+           (Result.Item.Source = (First => 2, Octet_Length => 2),
+            "monolithic short escape was not one complete raw-only scalar event");
+         Check (Result.Consumed = 2, "short escape denial consumed beyond its scalar");
+         Check (Core.State (Parser) = Core.Failure_Pending, "short escape denial was not pending");
+      end Check_Short_Escape_Denial_Event;
+   begin
+      Check_With_Capacities
+        (Quote
+         & "value"
+         & Euro
+         & Reverse_Solidus & "n"
+         & Reverse_Solidus & "uD83D" & Reverse_Solidus & "uDE00"
+         & Quote,
+         0,
+         0,
+         Core.Document_Complete);
+      Check_With_Capacities
+        ("["
+         & Quote & "outer" & Reverse_Solidus & "t" & Quote
+         & ",["
+         & Quote & Euro & Reverse_Solidus & "u0061" & Quote
+         & "]]",
+         0,
+         0,
+         Core.Document_Complete);
+      Check_With_Capacities ("{" & Quote & Quote & ":0}", 0, 1, Core.Document_Complete);
+      Check_With_Capacities
+        ("{" & Quote & "a" & Quote & ":0}",
+         0,
+         1,
+         Core.Parse_Failed,
+         Core.Name_Storage_Exhausted,
+         2,
+         Check_Prefix     => True,
+         Expected_Raw     => "a",
+         Expected_Decoded => "");
+      Check_With_Capacities
+        ("{" & Quote & Quote & ":0}",
+         0,
+         0,
+         Core.Parse_Failed,
+         Core.Duplicate_Index_Exhausted,
+         1);
+      Check_With_Capacities
+        ("{" & Quote & "a" & Quote & ":0," & Quote & "b" & Quote & ":1}",
+         4,
+         1,
+         Core.Parse_Failed,
+         Core.Duplicate_Index_Exhausted,
+         7,
+         Expected_Name_Ends => 1);
+      Check_With_Capacities
+        ("{" & Quote & "a" & Quote & ":0," & Quote & "a" & Quote & ":1}",
+         1,
+         1,
+         Core.Parse_Failed,
+         Core.Name_Storage_Exhausted,
+         8,
+         Expected_Name_Ends => 1,
+         Check_Prefix       => True,
+         Expected_Raw       => "a0a",
+         Expected_Decoded   => "a");
+      Check_With_Capacities
+        ("{" & Quote & E_Acute & Quote & ":0}", 2, 1, Core.Document_Complete);
+      Check_With_Capacities
+        ("{" & Quote & E_Acute & Quote & ":0}",
+         1,
+         1,
+         Core.Parse_Failed,
+         Core.Name_Storage_Exhausted,
+         2,
+         Check_Prefix     => True,
+         Expected_Raw     => E_Acute,
+         Expected_Decoded => "");
+      Check_With_Capacities
+        ("{" & Quote & Reverse_Solidus & "u20AC" & Quote & ":0}",
+         2,
+         1,
+         Core.Parse_Failed,
+         Core.Name_Storage_Exhausted,
+         2,
+         Check_Prefix     => True,
+         Expected_Raw     => Reverse_Solidus & "u20AC",
+         Expected_Decoded => "");
+      Check_With_Capacities
+        ("{" & Quote & Reverse_Solidus & Quote & Quote & ":0}",
+         0,
+         1,
+         Core.Parse_Failed,
+         Core.Name_Storage_Exhausted,
+         2,
+         Check_Prefix     => True,
+         Expected_Raw     => Reverse_Solidus & Quote,
+         Expected_Decoded => "");
+      Check_With_Capacities
+        ("{" & Quote & Reverse_Solidus & Reverse_Solidus & Quote & ":0}",
+         0,
+         1,
+         Core.Parse_Failed,
+         Core.Name_Storage_Exhausted,
+         2,
+         Check_Prefix     => True,
+         Expected_Raw     => Reverse_Solidus & Reverse_Solidus,
+         Expected_Decoded => "");
+      Check_With_Capacities
+        ("{" & Quote & Grinning_Face & Quote & ":0}",
+         3,
+         1,
+         Core.Parse_Failed,
+         Core.Name_Storage_Exhausted,
+         2,
+         Check_Prefix     => True,
+         Expected_Raw     => Grinning_Face,
+         Expected_Decoded => "");
+      Check_With_Capacities
+        ("{" & Quote & Reverse_Solidus & "uD83D" & Reverse_Solidus & "uDE00" & Quote & ":0}",
+         3,
+         1,
+         Core.Parse_Failed,
+         Core.Name_Storage_Exhausted,
+         2,
+         Check_Prefix     => True,
+         Expected_Raw     => Reverse_Solidus & "uD83D" & Reverse_Solidus & "uDE00",
+         Expected_Decoded => "");
+      Check_With_Capacities
+        ("{" & Quote & "a" & Quote & ":0," & Quote & "b" & Quote & ":1}",
+         2,
+         2,
+         Core.Document_Complete);
+      Check_With_Capacities
+        ("{" & Quote & "abcde" & Quote & ":0}",
+         4,
+         1,
+         Core.Parse_Failed,
+         Core.Name_Storage_Exhausted,
+         6,
+         Check_Prefix     => True,
+         Expected_Raw     => "abcde",
+         Expected_Decoded => "abcd");
+
+      --  Syntax validation precedes name-octet denial until a complete valid
+      --  scalar exists.  Name-index denial occurs earlier, at the opening
+      --  quote, because no candidate can begin.
+      Check_With_Capacities
+        ("{" & Quote & Character'Val (1) & Quote & ":0}",
+         0,
+         1,
+         Core.Parse_Failed,
+         Core.Raw_Control_Character,
+         2);
+      Check_With_Capacities
+        ("{" & Quote & Character'Val (16#C0#) & Quote & ":0}",
+         0,
+         1,
+         Core.Parse_Failed,
+         Core.Invalid_UTF8,
+         2);
+      Check_With_Capacities
+        ("{" & Quote & Reverse_Solidus & "q" & Quote & ":0}",
+         0,
+         1,
+         Core.Parse_Failed,
+         Core.Invalid_Escape,
+         3);
+      Check_With_Capacities
+        ("{" & Quote & Reverse_Solidus & "uDC00" & Quote & ":0}",
+         0,
+         1,
+         Core.Parse_Failed,
+         Core.Invalid_Surrogate,
+         2);
+      Check_With_Capacities
+        ("{" & Quote & Reverse_Solidus & "uD800" & Reverse_Solidus & "u0041" & Quote & ":0}",
+         0,
+         1,
+         Core.Parse_Failed,
+         Core.Invalid_Surrogate,
+         2);
+      Check_With_Capacities
+        ("{" & Quote & Character'Val (1) & Quote & ":0}",
+         0,
+         0,
+         Core.Parse_Failed,
+         Core.Duplicate_Index_Exhausted,
+         1);
+
+      declare
+         Parser : Core.Parser (4, 16, 4);
+         Seen   : Observation;
+      begin
+         Core.Initialize (Parser);
+         Drain
+           (Parser,
+            To_Input ("{" & Quote & "a" & Quote & ":0," & Quote & "a" & Quote & ":1}", -7),
+            0,
+            True,
+            Seen);
+         Check (Seen.Diagnostic.Code = Core.Duplicate_Name, "duplicate reset setup did not fail");
+         Core.Reset (Parser);
+         Seen := (others => <>);
+         Drain (Parser, To_Input ("{" & Quote & "b" & Quote & ":0}", 11), 0, True, Seen);
+         Check (Seen.Outcome = Core.Document_Complete, "duplicate reset left a ghost name");
+      end;
+
+      declare
+         Parser : Core.Parser (4, 0, 1);
+         Seen   : Observation;
+      begin
+         Core.Initialize (Parser);
+         Drain (Parser, To_Input ("{" & Quote & "a" & Quote & ":0}", -5), 0, True, Seen);
+         Check
+           (Seen.Diagnostic.Code = Core.Name_Storage_Exhausted,
+            "resource reset setup did not fail");
+         Core.Reset (Parser);
+         Seen := (others => <>);
+         Drain (Parser, To_Input ("{" & Quote & Quote & ":0}", 13), 0, True, Seen);
+         Check (Seen.Outcome = Core.Document_Complete, "resource reset left arena storage live");
+      end;
+
+      Check_Pending_Failure_Transition;
+      Check_Short_Escape_Denial_Event;
+   end Check_Duplicate_Capacities;
+
 begin
    Check_Valid_Splits ("null");
    Check_Valid_Splits ("true");
@@ -870,6 +1395,34 @@ begin
       Expected_Number_Text   => "0",
       Expected_Arrays        => 1);
    Check_Valid_Splits ("[[],{}]", Expected_Arrays => 2, Expected_Objects => 1);
+   Check_Valid_Splits
+     ("{"
+      & Quote & Quote & ":0,"
+      & Quote & Reverse_Solidus & "u0000" & Quote & ":1,"
+      & Quote & "a" & Quote & ":2,"
+      & Quote & "a" & Reverse_Solidus & "u0000" & Quote & ":3,"
+      & Quote & "ab" & Quote & ":4,"
+      & Quote & "abc" & Quote & ":5}",
+      Expected_Number_Octets => 6,
+      Expected_Number_Text   => "012345",
+      Expected_Objects       => 1);
+   Check_Valid_Splits
+     ("{" & Quote & "x" & Quote & ":{" & Quote & "a" & Quote & ":0},"
+      & Quote & "y" & Quote & ":{" & Quote & "a" & Quote & ":1}}",
+      Expected_Number_Octets => 2,
+      Expected_Number_Text   => "01",
+      Expected_Objects       => 3);
+   Check_Valid_Text_Splits
+     ("{" & Quote & Reverse_Solidus & "u00E9" & Quote & ":0,"
+      & Quote & "e" & Reverse_Solidus & "u0301" & Quote & ":1}",
+      Expected_Name    => E_Acute & "e" & Combining_Acute,
+      Expected_Names   => 2,
+      Expected_Strings => 0);
+   Check_Valid_Text_Splits
+     ("{" & Quote & "a" & Quote & ":0," & Quote & "A" & Quote & ":1}",
+      Expected_Name    => "aA",
+      Expected_Names   => 2,
+      Expected_Strings => 0);
 
    Check_Valid_Text_Splits (Quote & Quote, Expected_String => "");
    Check_Valid_Text_Splits (Quote & "ascii" & Quote, Expected_String => "ascii");
@@ -975,6 +1528,37 @@ begin
    Check_Invalid ("01", Core.Invalid_Number, 1);
    Check_Invalid ("[0,]", Core.Unexpected_Token, 3);
    Check_Invalid ("1.", Core.Truncated_Input, 2);
+
+   Check_Duplicate
+     ("{" & Quote & "a" & Quote & ":0," & Quote & "a" & Quote & ":1}", 7);
+   Check_Duplicate
+     ("{" & Quote & "a" & Quote & ":0,"
+      & Quote & Reverse_Solidus & "u0061" & Quote & ":1}",
+      7);
+   Check_Duplicate
+     ("{" & Quote & Reverse_Solidus & "u20AC" & Quote & ":0,"
+      & Quote & Euro & Quote & ":1}",
+      12);
+   Check_Duplicate
+     ("{" & Quote & Reverse_Solidus & "u00E9" & Quote & ":0,"
+      & Quote & E_Acute & Quote & ":1}",
+      12);
+   Check_Duplicate
+     ("{" & Quote & Reverse_Solidus & "uD83D" & Reverse_Solidus & "uDE00" & Quote & ":0,"
+      & Quote & Grinning_Face & Quote & ":1}",
+      18);
+   Check_Duplicate
+     ("{" & Quote & Reverse_Solidus & "/" & Quote & ":0,"
+      & Quote & "/" & Quote & ":1}",
+      8);
+   Check_Duplicate
+     ("{" & Quote & "a" & Quote & ":{" & Quote & "a" & Quote & ":0},"
+      & Quote & "a" & Quote & ":1}",
+      13,
+      Expected_Name_Begins => 3,
+      Expected_Name_Ends   => 2);
+
+   Check_Duplicate_Capacities;
 
    Check_Malformed_Prefix_Invariance
      ("12x", Core.Invalid_Number, 2, Expected_Raw => "12");

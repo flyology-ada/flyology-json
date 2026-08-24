@@ -47,7 +47,8 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       Check (Used = Input'Length, "reset parser did not consume the complete new document");
    end Drain_Reused_Parser;
 
-   Self       : Parser (1);
+   --  Explicit storage for the reset fixture; these values are not defaults.
+   Self       : Parser (1, 16, 4);
    Result     : Next_Result;
    Empty      : Ada.Streams.Stream_Element_Array (1 .. 0);
    Last_Byte  : constant Ada.Streams.Stream_Element_Array :=

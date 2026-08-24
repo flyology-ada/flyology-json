@@ -1,17 +1,21 @@
 with Ada.Streams;
+with Flyology_JSON.Parser_Duplicates;
 with Flyology_JSON.Parser_Numbers;
 with Flyology_JSON.Parser_UTF8;
 with Interfaces;
 
 --  Bounded, allocation-free incremental parser mechanism.
 --
---  This is a private implementation boundary.  It deliberately contains no
---  resource-accounting hooks or compatibility policy.
+--  This is the private strict-engine boundary.  Exact duplicate-name rejection
+--  is intrinsic here; future compatibility/reporting engines require their own
+--  reviewed mechanism before a public profile can select them.  This package
+--  deliberately contains no resource-accounting hooks.
 private package Flyology_JSON.Parser_Core is
 
    subtype Byte_Offset is Interfaces.Unsigned_64;
 
-   type Parser_State is (Uninitialized, Ready, Active, Completed, Failed, Aborted);
+   type Parser_State is
+     (Uninitialized, Ready, Active, Failure_Pending, Completed, Failed, Aborted);
 
    type Event_Kind is
      (Document_Begin,
@@ -45,6 +49,11 @@ private package Flyology_JSON.Parser_Core is
    type Decoded_Fragment_Kind is
      (No_Decoded_Fragment, Decoded_Is_Raw_Range, Decoded_Inline_Scalar);
 
+   --  No_Decoded_Fragment covers transport pieces that do not yet complete a
+   --  scalar and a complete scalar whose caller-backed name storage was
+   --  denied.  In the latter case State is Failure_Pending and the next Next
+   --  reports the retained terminal diagnostic without consuming input.
+
    type Inline_Scalar is record
       Length : Natural range 0 .. Parser_UTF8.Scalar_Octets'Length;
       Octets : Parser_UTF8.Scalar_Octets;
@@ -75,7 +84,10 @@ private package Flyology_JSON.Parser_Core is
       Invalid_Escape,
       Invalid_Surrogate,
       Raw_Control_Character,
+      Duplicate_Name,
       Depth_Exhausted,
+      Name_Storage_Exhausted,
+      Duplicate_Index_Exhausted,
       Offset_Exhausted);
 
    type Diagnostic is record
@@ -92,7 +104,11 @@ private package Flyology_JSON.Parser_Core is
       Diagnostic : Parser_Core.Diagnostic;
    end record;
 
-   type Parser (Maximum_Depth : Natural) is limited private;
+   type Parser
+     (Maximum_Depth       : Natural;
+      Name_Octet_Capacity : Natural;
+      Name_Capacity       : Natural)
+   is limited private;
 
    --  Initialize changes an Uninitialized parser to Ready.  In another state
    --  it is a nonraising no-op.
@@ -110,14 +126,14 @@ private package Flyology_JSON.Parser_Core is
 
    procedure Abort_Document (Self : in out Parser);
 
-   --  Reset creates a fresh Ready operation from Completed, Failed, or
-   --  Aborted.  In another state it is a nonraising no-op.
+   --  Reset creates a fresh Ready operation from Failure_Pending, Completed,
+   --  Failed, or Aborted.  In another state it is a nonraising no-op.
    procedure Reset (Self : in out Parser);
 
    function State (Self : Parser) return Parser_State;
 
    function Terminal_Diagnostic (Self : Parser) return Diagnostic
-   with Pre => State (Self) in Failed | Aborted;
+   with Pre => State (Self) in Failure_Pending | Failed | Aborted;
 
 private
 
@@ -134,7 +150,8 @@ private
       Object_Comma_Or_End);
 
    type Container_Frame is record
-      Phase : Container_Phase;
+      Phase             : Container_Phase;
+      Duplicate_Context : Parser_Duplicates.Object_Context;
    end record;
 
    type Frame_Array is array (Positive range <>) of Container_Frame;
@@ -150,12 +167,17 @@ private
       Text_Low_U,
       Text_Low_Digits);
 
-   type Parser (Maximum_Depth : Natural) is limited record
+   type Parser
+     (Maximum_Depth       : Natural;
+      Name_Octet_Capacity : Natural;
+      Name_Capacity       : Natural)
+   is limited record
       Current_State       : Parser_State := Uninitialized;
       Last_Diagnostic     : Diagnostic := (Code => No_Error, Offset => 0);
       Next_Offset         : Byte_Offset := 0;
       Depth               : Natural := 0;
       Stack               : Frame_Array (1 .. Maximum_Depth);
+      Duplicate_Names     : Parser_Duplicates.Index (Name_Octet_Capacity, Name_Capacity);
       Root_Started        : Boolean := False;
       Root_Complete       : Boolean := False;
       Document_End_Sent   : Boolean := False;
