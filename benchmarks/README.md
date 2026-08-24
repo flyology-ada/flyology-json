@@ -62,6 +62,21 @@ sample record by itself.
 `csv` reports latency summaries; `metrics_csv` reports the selected resource
 axes. All three machine-readable modes omit interactive progress.
 
+The comparison executable accepts benchmark-only exact-match selectors for
+targeted profiling. `FLYOLOGY_JSON_BENCH_IMPLEMENTATION` accepts one maintained
+implementation identifier and `FLYOLOGY_JSON_BENCH_FIXTURE` accepts one
+maintained fixture identifier. Implementation identifiers are `flyology_json`,
+`rapidjson-sax`, `yyjson`, `simdjson`, `rapidjson`, `serde_json`, `sonic-rs`,
+and `simd-json`. Fixture identifiers are `small_mixed`, `large_mixed`,
+`string_heavy`, `number_heavy`, `long_mantissa_numbers`, `deep_nesting`,
+`large_array`, and `large_object`. When both selectors are unset or empty the
+complete matrix runs; one empty selector leaves that dimension unfiltered. An
+unknown nonempty selector fails before preflight or measurement. Selection
+limits preflight and measured populations, but process elaboration still builds
+every fixture and reusable parser outside flyology_bench timing. Selectors do
+not change the default weekly matrix, and filtered output is not a complete
+comparison artifact.
+
 The initial harness validation resolved the indexed `flyology_bench 0.1.1-dev`
 release to subdirectory `flyology_bench` of `flyology-ada/flyology` at commit
 `243833e635b2fc4f990d86d32624c4f1b7e9951d`. This is an attested release origin,

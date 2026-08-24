@@ -791,11 +791,77 @@ procedure Flyology_JSON.Comparison_Benchmark is
    Fixture_Directory : constant String :=
      Ada.Environment_Variables.Value
        ("FLYOLOGY_JSON_BENCH_FIXTURE_DIRECTORY", Default => "");
+   Selected_Implementation : constant String :=
+     Ada.Environment_Variables.Value
+       ("FLYOLOGY_JSON_BENCH_IMPLEMENTATION", Default => "");
+   Selected_Fixture : constant String :=
+     Ada.Environment_Variables.Value
+       ("FLYOLOGY_JSON_BENCH_FIXTURE", Default => "");
+
+   function Is_Selected (Using : Implementation) return Boolean is
+     (Selected_Implementation'Length = 0
+      or else Selected_Implementation = Implementation_Name (Using));
+
+   function Is_Selected (Kind : Fixture_Kind) return Boolean is
+     (Selected_Fixture'Length = 0
+      or else Selected_Fixture = Unbounded.To_String (Fixtures (Kind).Name));
+
+   function Known_Implementation return Boolean is
+   begin
+      if Selected_Implementation'Length = 0 then
+         return True;
+      end if;
+      for Using in Implementation loop
+         if Selected_Implementation = Implementation_Name (Using) then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Known_Implementation;
+
+   function Known_Fixture return Boolean is
+   begin
+      if Selected_Fixture'Length = 0 then
+         return True;
+      end if;
+      for Kind in Fixture_Kind loop
+         if Selected_Fixture = Unbounded.To_String (Fixtures (Kind).Name) then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Known_Fixture;
+
+   function Has_Selected_Supported_Population return Boolean is
+   begin
+      for Kind in Fixture_Kind loop
+         for Using in Implementation loop
+            if Is_Selected (Kind) and then Is_Selected (Using)
+              and then Supported (Using, Kind)
+            then
+               return True;
+            end if;
+         end loop;
+      end loop;
+      return False;
+   end Has_Selected_Supported_Population;
 
 begin
    if Output_Mode not in "terminal" | "csv" | "metrics_csv" | "json" then
       raise Constraint_Error with
         "FLYOLOGY_JSON_BENCH_OUTPUT must be terminal, csv, metrics_csv, or json";
+   end if;
+
+   if not Known_Implementation then
+      raise Constraint_Error with "unknown FLYOLOGY_JSON_BENCH_IMPLEMENTATION";
+   end if;
+
+   if not Known_Fixture then
+      raise Constraint_Error with "unknown FLYOLOGY_JSON_BENCH_FIXTURE";
+   end if;
+
+   if not Has_Selected_Supported_Population then
+      raise Constraint_Error with "selected comparison population is unsupported";
    end if;
 
    if Fixture_Directory'Length > 0 then
@@ -805,18 +871,20 @@ begin
    if Dump_Preflight then
       for Kind in Fixture_Kind loop
          for Using in Implementation loop
-            if Supported (Using, Kind) then
-               declare
-                  Value : U64;
-               begin
-                  Preflight (Using, Kind);
-                  Run_Once (Using, Kind, Value);
-                  Ada.Text_IO.Put_Line
-                    ("implementation=" & Implementation_Name (Using)
-                     & " fixture=" & Unbounded.To_String (Fixtures (Kind).Name)
-                     & " value="
-                     & Ada.Strings.Fixed.Trim (U64'Image (Value), Ada.Strings.Both));
-               end;
+            if Is_Selected (Kind) and then Is_Selected (Using) then
+               if Supported (Using, Kind) then
+                  declare
+                     Value : U64;
+                  begin
+                     Preflight (Using, Kind);
+                     Run_Once (Using, Kind, Value);
+                     Ada.Text_IO.Put_Line
+                       ("implementation=" & Implementation_Name (Using)
+                        & " fixture=" & Unbounded.To_String (Fixtures (Kind).Name)
+                        & " value="
+                        & Ada.Strings.Fixed.Trim (U64'Image (Value), Ada.Strings.Both));
+                  end;
+               end if;
             end if;
          end loop;
       end loop;
@@ -831,48 +899,50 @@ begin
 
    for Kind in Fixture_Kind loop
       for Using in Implementation loop
-         if Supported (Using, Kind) then
-            declare
-               Item   : Fixture renames Fixtures (Kind);
-               Result : Flyology_Bench.Measurement;
-               Name   : constant String :=
-                 "comparison/lane=" & Lane_Name (Using)
-                 & "/implementation=" & Implementation_Name (Using)
-                 & "/fixture=" & Unbounded.To_String (Item.Name)
-                 & "/bytes=" & Trimmed_Image (Natural (Item.Data'Length));
-               Config : constant Flyology_Bench.Configuration :=
-                 (if Output_Mode = "terminal"
-                  then Flyology_Bench.Reporters.Terminal_Mode (Base_Config, Name)
-                  else Base_Config);
-            begin
-               Preflight (Using, Kind);
-               Current_Implementation := Using;
-               Current_Fixture := Kind;
-               Measure_Implementation (Config => Config, Result => Result);
-               if Output_Mode = "terminal" then
-                  Flyology_Bench.Reporters.Put_Console (Name, Result);
-                  Ada.Text_IO.Put_Line
-                    ("  median throughput:"
-                     & Long_Float'Image
-                         (Long_Float (Item.Data'Length) * 1_000_000_000.0
-                          / Flyology_Bench.Median_Nanoseconds (Result)
-                          / 1_048_576.0)
-                     & " MiB/s");
-               elsif Output_Mode = "csv" then
-                  Flyology_Bench.Reporters.Put_CSV (Name, Result);
-               elsif Output_Mode = "metrics_csv" then
-                  Flyology_Bench.Reporters.Put_Metrics_CSV (Name, Result);
-               else
-                  Flyology_Bench.Reporters.Put_JSON (Name, Result);
-               end if;
-            end;
-         else
-            Ada.Text_IO.Put_Line
-              (Ada.Text_IO.Standard_Error,
-               "skip lane=" & Lane_Name (Using)
-               & " implementation=" & Implementation_Name (Using)
-               & " fixture=" & Unbounded.To_String (Fixtures (Kind).Name)
-               & " reason=declared_depth_limit");
+         if Is_Selected (Kind) and then Is_Selected (Using) then
+            if Supported (Using, Kind) then
+               declare
+                  Item   : Fixture renames Fixtures (Kind);
+                  Result : Flyology_Bench.Measurement;
+                  Name   : constant String :=
+                    "comparison/lane=" & Lane_Name (Using)
+                    & "/implementation=" & Implementation_Name (Using)
+                    & "/fixture=" & Unbounded.To_String (Item.Name)
+                    & "/bytes=" & Trimmed_Image (Natural (Item.Data'Length));
+                  Config : constant Flyology_Bench.Configuration :=
+                    (if Output_Mode = "terminal"
+                     then Flyology_Bench.Reporters.Terminal_Mode (Base_Config, Name)
+                     else Base_Config);
+               begin
+                  Preflight (Using, Kind);
+                  Current_Implementation := Using;
+                  Current_Fixture := Kind;
+                  Measure_Implementation (Config => Config, Result => Result);
+                  if Output_Mode = "terminal" then
+                     Flyology_Bench.Reporters.Put_Console (Name, Result);
+                     Ada.Text_IO.Put_Line
+                       ("  median throughput:"
+                        & Long_Float'Image
+                            (Long_Float (Item.Data'Length) * 1_000_000_000.0
+                             / Flyology_Bench.Median_Nanoseconds (Result)
+                             / 1_048_576.0)
+                        & " MiB/s");
+                  elsif Output_Mode = "csv" then
+                     Flyology_Bench.Reporters.Put_CSV (Name, Result);
+                  elsif Output_Mode = "metrics_csv" then
+                     Flyology_Bench.Reporters.Put_Metrics_CSV (Name, Result);
+                  else
+                     Flyology_Bench.Reporters.Put_JSON (Name, Result);
+                  end if;
+               end;
+            else
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "skip lane=" & Lane_Name (Using)
+                  & " implementation=" & Implementation_Name (Using)
+                  & " fixture=" & Unbounded.To_String (Fixtures (Kind).Name)
+                  & " reason=declared_depth_limit");
+            end if;
          end if;
       end loop;
    end loop;

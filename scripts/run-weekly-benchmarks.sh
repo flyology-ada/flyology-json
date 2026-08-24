@@ -86,6 +86,8 @@ esac
   fi
   cat "$output_directory/comparison-build.log"
   FLYOLOGY_JSON_BENCH_OUTPUT=json \
+    FLYOLOGY_JSON_BENCH_IMPLEMENTATION= \
+    FLYOLOGY_JSON_BENCH_FIXTURE= \
     FLYOLOGY_JSON_BENCH_FIXTURE_DIRECTORY="$output_directory/fixtures" \
     "$comparison_executable" \
     >"$output_directory/comparison-summary.jsonl" \
