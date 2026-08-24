@@ -4,15 +4,36 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 benchmarks=$(CDPATH= cd -- "$root/../.." && pwd)
 
+if [ "$#" -gt 1 ]; then
+    echo "usage: ./test.sh [portable|native]" >&2
+    exit 2
+fi
+
+tracks=${1:-"portable native"}
+case "$tracks" in
+    portable | native | "portable native") ;;
+    *)
+        echo "track must be portable or native" >&2
+        exit 2
+        ;;
+esac
+
 "$root/acquire.sh"
 "$root/verify.sh"
 
 case "$(uname -m)" in
     arm64 | aarch64) native_cpu_flag=mcpu_native ;;
-    *) native_cpu_flag=march_native ;;
+    x86_64 | amd64) native_cpu_flag=march_native ;;
+    *)
+        if [ "$tracks" != portable ]; then
+            echo "unsupported native benchmark architecture: $(uname -m)" >&2
+            exit 2
+        fi
+        native_cpu_flag=march_native
+        ;;
 esac
 
-for track in portable native
+for track in $tracks
 do
     (
         cd "$benchmarks"

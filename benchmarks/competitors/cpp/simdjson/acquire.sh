@@ -5,15 +5,16 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_root=$(CDPATH= cd -- "$root/../../../.." && pwd)
 destination="$root/upstream"
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/flyology-json-simdjson.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 revision=17fef66827864c33170996554b7aa0598da080cd
 prefix="simdjson-$revision"
-archive="$temporary/source.tar.gz"
+cache_dir=${FLYOLOGY_JSON_BENCH_SOURCE_CACHE:-/tmp/flyology-json-benchmark-sources}
+archive="$cache_dir/simdjson-4.6.8-17fef668.tar.gz"
 staging="$temporary/materialized"
-url="https://github.com/simdjson/simdjson/archive/$revision.tar.gz"
 
 digest()
 {
@@ -24,7 +25,9 @@ digest()
     fi
 }
 
-curl -fsSL "$url" -o "$archive"
+if [ ! -f "$archive" ]; then
+    "$project_root/scripts/verify-benchmark-sources.sh" "$cache_dir"
+fi
 
 if [ "$(wc -c < "$archive" | tr -d ' ')" != 6691503 ]; then
     echo "simdjson archive byte count does not match sources.lock.tsv" >&2

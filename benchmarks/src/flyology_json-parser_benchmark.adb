@@ -33,6 +33,7 @@ procedure Flyology_JSON.Parser_Benchmark is
       Large_Mixed,
       String_Heavy,
       Number_Heavy,
+      Long_Mantissa_Numbers,
       Deep_Nesting,
       Large_Array,
       Large_Object);
@@ -150,6 +151,20 @@ procedure Flyology_JSON.Parser_Benchmark is
    function Make_Number_Heavy return Fixture is
       Text : Unbounded.Unbounded_String := Unbounded.To_Unbounded_String ("[");
    begin
+      for Index in 0 .. 8_191 loop
+         if Index > 0 then
+            Unbounded.Append (Text, ',');
+         end if;
+         Unbounded.Append (Text, "0,-1,123456789,1.5,6.022e23,-0.001");
+      end loop;
+      Unbounded.Append (Text, ']');
+      return Make_Fixture
+        ("number_heavy", Text, Maximum_Depth => 1, Name_Octets => 0, Names => 0);
+   end Make_Number_Heavy;
+
+   function Make_Long_Mantissa_Numbers return Fixture is
+      Text : Unbounded.Unbounded_String := Unbounded.To_Unbounded_String ("[");
+   begin
       for Index in 0 .. 32_767 loop
          if Index > 0 then
             Unbounded.Append (Text, ',');
@@ -158,8 +173,12 @@ procedure Flyology_JSON.Parser_Benchmark is
       end loop;
       Unbounded.Append (Text, ']');
       return Make_Fixture
-        ("number_heavy", Text, Maximum_Depth => 1, Name_Octets => 0, Names => 0);
-   end Make_Number_Heavy;
+        ("long_mantissa_numbers",
+         Text,
+         Maximum_Depth => 1,
+         Name_Octets   => 0,
+         Names         => 0);
+   end Make_Long_Mantissa_Numbers;
 
    function Make_Deep_Nesting return Fixture is
       Text : Unbounded.Unbounded_String;
@@ -227,6 +246,7 @@ procedure Flyology_JSON.Parser_Benchmark is
       Large_Mixed   => Make_Large_Mixed,
       String_Heavy  => Make_String_Heavy,
       Number_Heavy  => Make_Number_Heavy,
+      Long_Mantissa_Numbers => Make_Long_Mantissa_Numbers,
       Deep_Nesting  => Make_Deep_Nesting,
       Large_Array   => Make_Large_Array,
       Large_Object  => Make_Large_Object];
@@ -380,6 +400,9 @@ procedure Flyology_JSON.Parser_Benchmark is
    Output_Mode : constant String :=
      Ada.Environment_Variables.Value
        ("FLYOLOGY_JSON_BENCH_OUTPUT", Default => "terminal");
+   Dump_Preflight : constant Boolean :=
+     Ada.Environment_Variables.Value
+       ("FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY", Default => "false") = "true";
 
    function Parser_Storage_Bytes (Item : Fixture) return Natural is
       Parser : Core.Parser
@@ -413,9 +436,9 @@ begin
         "FLYOLOGY_JSON_BENCH_OUTPUT must be terminal, csv, metrics_csv, or json";
    end if;
 
-   if Output_Mode = "csv" then
+   if not Dump_Preflight and then Output_Mode = "csv" then
       Flyology_Bench.Reporters.Put_CSV_Header;
-   elsif Output_Mode = "metrics_csv" then
+   elsif not Dump_Preflight and then Output_Mode = "metrics_csv" then
       Flyology_Bench.Reporters.Put_Metrics_CSV_Header;
    end if;
 
@@ -437,22 +460,26 @@ begin
                   then Flyology_Bench.Reporters.Terminal_Mode (Base_Config, Name)
                   else Base_Config);
             begin
-               Measure_Parser (Config => Config, Result => Result);
-               if Output_Mode = "terminal" then
-                  Flyology_Bench.Reporters.Put_Console (Name, Result);
-                  Ada.Text_IO.Put_Line
-                    ("  median throughput:"
-                     & Long_Float'Image
-                         (Long_Float (Item.Data'Length) * 1_000_000_000.0
-                          / Flyology_Bench.Median_Nanoseconds (Result)
-                          / 1_048_576.0)
-                     & " MiB/s");
-               elsif Output_Mode = "csv" then
-                  Flyology_Bench.Reporters.Put_CSV (Name, Result);
-               elsif Output_Mode = "metrics_csv" then
-                  Flyology_Bench.Reporters.Put_Metrics_CSV (Name, Result);
+               if Dump_Preflight then
+                  Ada.Text_IO.Put_Line (Name);
                else
-                  Flyology_Bench.Reporters.Put_JSON (Name, Result);
+                  Measure_Parser (Config => Config, Result => Result);
+                  if Output_Mode = "terminal" then
+                     Flyology_Bench.Reporters.Put_Console (Name, Result);
+                     Ada.Text_IO.Put_Line
+                       ("  median throughput:"
+                        & Long_Float'Image
+                            (Long_Float (Item.Data'Length) * 1_000_000_000.0
+                             / Flyology_Bench.Median_Nanoseconds (Result)
+                             / 1_048_576.0)
+                        & " MiB/s");
+                  elsif Output_Mode = "csv" then
+                     Flyology_Bench.Reporters.Put_CSV (Name, Result);
+                  elsif Output_Mode = "metrics_csv" then
+                     Flyology_Bench.Reporters.Put_Metrics_CSV (Name, Result);
+                  else
+                     Flyology_Bench.Reporters.Put_JSON (Name, Result);
+                  end if;
                end if;
             end;
          end;

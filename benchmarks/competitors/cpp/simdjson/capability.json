@@ -13,11 +13,11 @@
   "build_tracks": {
     "portable": {
       "supported": true,
-      "reason": "C++17 with -O3 and no host-specific ISA compile flag; unmodified simdjson runtime ISA dispatch remains enabled."
+      "reason": "C++17 with -O3 and NDEBUG, without a host-specific ISA compile flag; unmodified simdjson runtime ISA dispatch remains enabled."
     },
     "native": {
       "supported": true,
-      "reason": "The portable flags add -mcpu=native on arm64/aarch64 and -march=native elsewhere."
+      "reason": "The portable release flags add -mcpu=native on arm64/aarch64 or -march=native on x86_64/amd64; other native architectures fail closed."
     }
   },
   "lanes": [
@@ -57,7 +57,7 @@
       "observable_result": "Checksum over decoded strings, names, value kinds, and container counts plus event, scalar, member-name, and exact input-byte counters.",
       "limitations": [
         "The input must be prepared once with 64 readable padding octets; preparation is outside the lane only when the result records it as reusable.",
-        "DOM allocation, number conversion, recursive traversal, and per-call parser cleanup are timed.",
+        "The adapter owns one thread-local reusable parser. The harness preflight grows its capacity outside timing; per-document parsing, number conversion, traversal, and document replacement are timed.",
         "The adapter does not expose number lexemes or error offsets."
       ]
     },

@@ -22,7 +22,8 @@ The maintained synthetic fixtures exercise:
 - a small mixed object;
 - a large array of mixed nested objects;
 - a string-heavy object containing direct ASCII, direct UTF-8, and escapes;
-- a number-heavy array preserving long exact lexemes;
+- a representative number-heavy array preserving exact lexemes;
+- an adversarial array of long-mantissa exponent spellings;
 - 256 levels of nesting;
 - a large scalar array; and
 - a large object with unique member names.
@@ -48,9 +49,16 @@ alr build --release
 FLYOLOGY_JSON_BENCH_OUTPUT=json bin/flyology_json-parser_benchmark
 ```
 
+This is the portable build track. A native directional experiment must set
+both `FLYOLOGY_JSON_BENCH_TUNING=native` and the reviewed architecture-specific
+`FLYOLOGY_JSON_BENCH_NATIVE_SWITCH` used to build it. Native and portable
+results are separate populations.
+
 `FLYOLOGY_JSON_BENCH_OUTPUT` accepts `terminal`, `csv`, `metrics_csv`, or
 `json`; the default is `terminal`. JSON output is newline-delimited and retains
-raw samples and the host/toolchain metadata reported by `flyology_bench`.
+the distribution summary and host/toolchain metadata reported by
+`flyology_bench`. It does not satisfy the comparison contract's formal raw
+sample record by itself.
 `csv` reports latency summaries; `metrics_csv` reports the selected resource
 axes. All three machine-readable modes omit interactive progress.
 
@@ -59,6 +67,13 @@ release to subdirectory `flyology_bench` of `flyology-ada/flyology` at commit
 `243833e635b2fc4f990d86d32624c4f1b7e9951d`. This is an attested release origin,
 not a Git pin; Alire's generated resolution and compiler-provider selection
 remain under ignored `alire/` state.
+
+Because an indexed development release may acquire a newer reviewed origin,
+every scheduled artifact retains the actual generated benchmark Alire lock.
+Results with different resolved origins are separate populations until the
+source identity and any behavioral differences have been reviewed. The
+repository deliberately does not replace index resolution with a downstream
+Git pin.
 
 The fixed measurement policy is 100 ms untimed warmup, a 500 ms measurement
 target, no early sampling-time cap, 50 retained samples, at least 100 us per
@@ -93,6 +108,40 @@ The maintained cross-implementation contract is under
 lanes, portable and native build tracks, capability and result disclosures,
 and exact benchmark-only source attestations. External libraries never become
 dependencies of the production `flyology_json` crate.
+
+Pull-request CI builds and tests both adapter tracks on macOS and Linux. The
+weekly workflow then runs both the 40-population Flyology chunk-schedule matrix
+and the 63-population cross-implementation matrix. It retains each JSONL
+distribution summary, a derived TSV, explicit skips, toolchain and host output,
+capabilities, exact generated fixtures, source and license locks, harness
+sources, dependency locks, measured executable and Rust static library, the
+verbose GPR build log, and an artifact-wide SHA-256 manifest. GitHub-hosted
+runner measurements are always classified as `directional`; they are not a
+formal regression scorecard.
+
+The parser matrix fixes semantic fixture, chunk, event, and call identities.
+`parser_bytes` remains a positive measured field in every record, but is not an
+exact cross-target identity because Ada object representation is compiler- and
+target-dependent.
+
+The comparison driver passes identical document octets to every implementation
+and preflights every admitted operation. It reports Flyology and RapidJSON SAX
+under `parse_events`, yyjson under `parse_validate`, and the C++ and Rust DOM
+implementations under `parse_dom`. Those lanes are intentionally not merged
+into one leaderboard. Fixture construction, reusable simdjson padding, and
+benchmark setup are outside timing; per-operation parsing, observation,
+cleanup, allocation, conversion, and simd-json's required private input copy
+are included as declared by each capability record.
+
+Flyology and RapidJSON SAX share the event lane but not identical event
+granularity: Flyology exposes incremental begin/fragment/end observations,
+whereas RapidJSON supplies one callback for each complete decoded name, string,
+or number. The harness verifies each implementation's exact expected semantic
+counters and checksum before timing. Cross-lane results remain useful context,
+not a claim that validation, event delivery, and owned-DOM construction perform
+the same work. The `compiler` field in a `flyology_bench` JSONL context names
+the Ada driver compiler; foreign compiler identities and flags are retained in
+the environment, capability records, Cargo manifest, and verbose build log.
 
 Acquire and verify the approved source archives outside the checkout with:
 

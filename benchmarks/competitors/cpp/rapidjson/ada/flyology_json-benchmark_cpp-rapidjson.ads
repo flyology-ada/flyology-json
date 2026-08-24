@@ -9,4 +9,8 @@ package Flyology_JSON.Benchmark_CPP.Rapidjson is
      (Data        : Ada.Streams.Stream_Element_Array;
       Observation : out Parse_Observation);
 
+   procedure Parse_Events
+     (Data        : Ada.Streams.Stream_Element_Array;
+      Observation : out Parse_Observation);
+
 end Flyology_JSON.Benchmark_CPP.Rapidjson;

@@ -30,9 +30,10 @@ Run the host-specific build separately:
 FLYOLOGY_JSON_BENCH_TUNING=native ./test.sh
 ```
 
-On arm64/aarch64, the native track adds `-mcpu=native`; other hosts add
-`-march=native`. The portable track adds neither. simdjson's unmodified runtime
-ISA dispatch remains enabled in both tracks.
+On arm64/aarch64, the native track adds `-mcpu=native`; x86_64/amd64 adds
+`-march=native`. Other native architectures fail closed. The portable track
+adds neither. simdjson's unmodified runtime ISA dispatch remains enabled in
+both tracks.
 
 `test.sh` verifies source and license attestations, validates both capability
 records against `comparison/capability.schema.json`, builds the Ada/C++

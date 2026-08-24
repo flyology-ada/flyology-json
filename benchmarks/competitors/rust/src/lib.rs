@@ -23,11 +23,24 @@ impl Observation {
     #[inline]
     fn mix(&mut self, kind: u64, length: usize) {
         self.items = self.items.wrapping_add(1);
-        self.checksum = self
-            .checksum
+        let term = kind
             .wrapping_mul(0x9e37_79b1_85eb_ca87)
-            .wrapping_add(kind)
             .wrapping_add(length as u64);
+        self.checksum = self.checksum.wrapping_add(term);
+    }
+
+    #[inline]
+    fn mix_bytes(&mut self, kind: u64, bytes: &[u8]) {
+        self.items = self.items.wrapping_add(1);
+        let mut term = kind
+            .wrapping_mul(0x9e37_79b1_85eb_ca87)
+            .wrapping_add(bytes.len() as u64);
+        for byte in bytes {
+            term = term
+                .wrapping_mul(0x100_0000_01b3)
+                .wrapping_add(u64::from(*byte));
+        }
+        self.checksum = self.checksum.wrapping_add(term);
     }
 }
 
@@ -45,7 +58,7 @@ fn traverse_serde(value: &serde_json::Value, observation: &mut Observation) {
             };
             observation.mix(kind, 0);
         }
-        serde_json::Value::String(value) => observation.mix(7, value.len()),
+        serde_json::Value::String(value) => observation.mix_bytes(7, value.as_bytes()),
         serde_json::Value::Array(values) => {
             observation.mix(8, values.len());
             for value in values {
@@ -56,7 +69,7 @@ fn traverse_serde(value: &serde_json::Value, observation: &mut Observation) {
         serde_json::Value::Object(values) => {
             observation.mix(10, values.len());
             for (name, value) in values {
-                observation.mix(11, name.len());
+                observation.mix_bytes(11, name.as_bytes());
                 traverse_serde(value, observation);
             }
             observation.mix(12, values.len());
@@ -74,7 +87,7 @@ fn traverse_sonic(value: &sonic_rs::Value, observation: &mut Observation) {
     } else if value.is_number() {
         observation.mix(4, 0);
     } else if let Some(value) = value.as_str() {
-        observation.mix(7, value.len());
+        observation.mix_bytes(7, value.as_bytes());
     } else if let Some(values) = value.as_array() {
         observation.mix(8, values.len());
         for value in values {
@@ -84,7 +97,7 @@ fn traverse_sonic(value: &sonic_rs::Value, observation: &mut Observation) {
     } else if let Some(values) = value.as_object() {
         observation.mix(10, values.len());
         for (name, value) in values {
-            observation.mix(11, name.len());
+            observation.mix_bytes(11, name.as_bytes());
             traverse_sonic(value, observation);
         }
         observation.mix(12, values.len());
@@ -93,29 +106,29 @@ fn traverse_sonic(value: &sonic_rs::Value, observation: &mut Observation) {
     }
 }
 
-fn traverse_simd(value: &simd_json::BorrowedValue<'_>, observation: &mut Observation) {
+fn traverse_simd(value: &simd_json::OwnedValue, observation: &mut Observation) {
     use simd_json::prelude::*;
 
     match value {
-        simd_json::BorrowedValue::Static(value) => match value {
+        simd_json::OwnedValue::Static(value) => match value {
             simd_json::StaticNode::Null => observation.mix(1, 0),
             simd_json::StaticNode::Bool(value) => observation.mix(2 + u64::from(*value), 0),
             simd_json::StaticNode::I64(_) => observation.mix(4, 0),
             simd_json::StaticNode::U64(_) => observation.mix(5, 0),
             simd_json::StaticNode::F64(_) => observation.mix(6, 0),
         },
-        simd_json::BorrowedValue::String(value) => observation.mix(7, value.len()),
-        simd_json::BorrowedValue::Array(values) => {
+        simd_json::OwnedValue::String(value) => observation.mix_bytes(7, value.as_bytes()),
+        simd_json::OwnedValue::Array(values) => {
             observation.mix(8, values.len());
             for value in values.iter() {
                 traverse_simd(value, observation);
             }
             observation.mix(9, values.len());
         }
-        simd_json::BorrowedValue::Object(values) => {
+        simd_json::OwnedValue::Object(values) => {
             observation.mix(10, values.len());
             for (name, value) in values.iter() {
-                observation.mix(11, name.len());
+                observation.mix_bytes(11, name.as_bytes());
                 traverse_simd(value, observation);
             }
             observation.mix(12, values.len());
@@ -233,7 +246,7 @@ pub unsafe extern "C" fn flyology_json_bench_simd_json_traverse(
         let source = unsafe { input(input_pointer, length) }?;
         let mut private_input = source.to_vec();
         let value =
-            simd_json::to_borrowed_value(&mut private_input).map_err(|_| STATUS_PARSE_ERROR)?;
+            simd_json::to_owned_value(&mut private_input).map_err(|_| STATUS_PARSE_ERROR)?;
         let mut observation = Observation::default();
         traverse_simd(&value, &mut observation);
         Ok::<Observation, i32>(observation)
@@ -282,8 +295,8 @@ mod tests {
         assert_eq!(sonic.0, STATUS_OK);
         assert_eq!(serde.2, 10);
         assert_eq!(sonic.2, 10);
-        assert_eq!(serde.1, 8_276_310_347_018_424_111);
-        assert_eq!(sonic.1, 5_302_750_202_477_362_561);
+        assert_eq!(serde.1, 9_979_358_259_564_605_272);
+        assert_eq!(sonic.1, 5_624_672_763_124_767_306);
     }
 
     #[test]
@@ -301,7 +314,7 @@ mod tests {
             )
         };
         assert_eq!(status, STATUS_OK);
-        assert_eq!(checksum, 8_276_310_347_018_424_111);
+        assert_eq!(checksum, 9_979_358_259_564_605_272);
         assert_eq!(items, 10);
         assert_eq!(sample, original);
     }
@@ -412,7 +425,7 @@ mod tests {
         assert_eq!(sonic_values, [Some(1), Some(2)]);
 
         let mut simd_input = input.to_vec();
-        assert!(simd_json::to_borrowed_value(&mut simd_input).is_ok());
+        assert!(simd_json::to_owned_value(&mut simd_input).is_ok());
     }
 
     #[test]
@@ -424,11 +437,11 @@ mod tests {
         assert!(sonic_rs::from_slice::<sonic_rs::Value>(high).is_err());
 
         let mut simd_high = high.to_vec();
-        let value = simd_json::to_borrowed_value(&mut simd_high).unwrap();
+        let value = simd_json::to_owned_value(&mut simd_high).unwrap();
         assert_eq!(value.as_str(), Some("\0"));
 
         let mut simd_low = low.to_vec();
-        assert!(simd_json::to_borrowed_value(&mut simd_low).is_err());
+        assert!(simd_json::to_owned_value(&mut simd_low).is_err());
     }
 
     #[test]
@@ -445,9 +458,9 @@ mod tests {
         assert!(sonic_rs::from_slice::<sonic_rs::Value>(&nested(256)).is_ok());
 
         let mut simd_maximum = nested(1_024);
-        assert!(simd_json::to_borrowed_value(&mut simd_maximum).is_ok());
+        assert!(simd_json::to_owned_value(&mut simd_maximum).is_ok());
         let mut simd_excess = nested(1_025);
-        assert!(simd_json::to_borrowed_value(&mut simd_excess).is_err());
+        assert!(simd_json::to_owned_value(&mut simd_excess).is_err());
     }
 
     #[test]

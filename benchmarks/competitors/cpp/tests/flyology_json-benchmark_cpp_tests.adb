@@ -56,13 +56,16 @@ procedure Flyology_JSON.Benchmark_CPP_Tests is
       Rapid_Copy : constant Ada.Streams.Stream_Element_Array := Rapid_Data;
       Simd_Copy  : constant Ada.Streams.Stream_Element_Array := Simd_Data;
       Rapid_Result : Parse_Observation;
+      Event_Result : Parse_Observation;
       Simd_Result  : Parse_Observation;
    begin
       Rapid.Parse_DOM (Rapid_Data, Rapid_Result);
+      Rapid.Parse_Events (Rapid_Data, Event_Result);
       Simd.Parse_DOM (Simd_Data, Interfaces.Unsigned_64 (Text'Length), Simd_Result);
 
       Check (Rapid_Result.Status = Accepted, "RapidJSON rejected valid JSON");
       Check (Simd_Result.Status = Accepted, "simdjson rejected valid JSON");
+      Check (Event_Result.Status = Accepted, "RapidJSON SAX rejected valid JSON");
       Check (Rapid_Result.Checksum = Simd_Result.Checksum, "competitor checksums disagree");
       Check (Rapid_Result.Event_Count = Simd_Result.Event_Count, "event counts disagree");
       Check (Rapid_Result.Scalar_Count = Simd_Result.Scalar_Count, "scalar counts disagree");
@@ -75,23 +78,33 @@ procedure Flyology_JSON.Benchmark_CPP_Tests is
       Check
         (Simd_Result.Input_Bytes = Interfaces.Unsigned_64 (Text'Length),
          "simdjson input count changed");
+      Check
+        (Event_Result.Event_Count = Rapid_Result.Event_Count
+         and then Event_Result.Scalar_Count = Rapid_Result.Scalar_Count
+         and then Event_Result.Member_Name_Count = Rapid_Result.Member_Name_Count
+         and then Event_Result.Input_Bytes = Interfaces.Unsigned_64 (Text'Length),
+         "RapidJSON SAX observation counts disagree with its DOM");
       Check (Rapid_Data = Rapid_Copy, "RapidJSON mutated borrowed input");
       Check (Simd_Data = Simd_Copy, "simdjson mutated borrowed input or padding");
    end Check_Valid;
 
    procedure Check_Rejected (Text : String; First : Offset) is
       Rapid_Result : Parse_Observation;
+      Event_Result : Parse_Observation;
       Simd_Result  : Parse_Observation;
    begin
       Rapid.Parse_DOM (Octets (Text, First), Rapid_Result);
+      Rapid.Parse_Events (Octets (Text, First), Event_Result);
       Simd.Parse_DOM
         (Padded_Octets (Text, First - 13),
          Interfaces.Unsigned_64 (Text'Length),
          Simd_Result);
       Check (Rapid_Result.Status = Parse_Error, "RapidJSON accepted disabled syntax: " & Text);
       Check (Simd_Result.Status = Parse_Error, "simdjson accepted disabled syntax: " & Text);
+      Check (Event_Result.Status = Parse_Error, "RapidJSON SAX accepted disabled syntax: " & Text);
       Check (Rapid_Result.Checksum = 0, "RapidJSON published failure counters");
       Check (Simd_Result.Checksum = 0, "simdjson published failure counters");
+      Check (Event_Result.Checksum = 0, "RapidJSON SAX published failure counters");
    end Check_Rejected;
 
    function Nested_Array (Depth : Positive) return String is
@@ -175,11 +188,14 @@ begin
       Bad_UTF8 : constant String :=
         '"' & Character'Val (16#C0#) & Character'Val (16#AF#) & '"';
       Rapid_Result : Parse_Observation;
+      Event_Result : Parse_Observation;
       Simd_Result  : Parse_Observation;
    begin
       Rapid.Parse_DOM (Octets (BOM, 19), Rapid_Result);
+      Rapid.Parse_Events (Octets (BOM, -9), Event_Result);
       Simd.Parse_DOM (Padded_Octets (BOM, -19), Interfaces.Unsigned_64 (BOM'Length), Simd_Result);
       Check (Rapid_Result.Status = Accepted, "RapidJSON stopped accepting an initial BOM");
+      Check (Event_Result.Status = Parse_Error, "RapidJSON SAX stopped rejecting an initial BOM");
       Check (Simd_Result.Status = Accepted, "simdjson stopped accepting an initial BOM");
       Check_Rejected (Bad_UTF8, -19);
       Check_Rejected ('"' & ASCII.LF & '"', 27);

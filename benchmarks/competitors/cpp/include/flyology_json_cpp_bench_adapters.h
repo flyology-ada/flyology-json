@@ -51,6 +51,17 @@ int32_t flyology_json_bench_rapidjson_dom(
     uint64_t length,
     struct flyology_json_cpp_bench_observation *observation);
 
+/* Parses one complete document through RapidJSON's Reader/SAX API and visits
+ * every structural token, member name, and scalar. Numbers are reported as
+ * exact lexical spans instead of being converted. `input` must identify
+ * `length` readable bytes. The function does not retain input. `observation`
+ * is written only on success and must not overlap input.
+ */
+int32_t flyology_json_bench_rapidjson_events(
+    const uint8_t *input,
+    uint64_t length,
+    struct flyology_json_cpp_bench_observation *observation);
+
 #ifdef __cplusplus
 }
 #endif

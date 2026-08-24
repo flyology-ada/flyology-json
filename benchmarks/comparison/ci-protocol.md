@@ -23,21 +23,33 @@ Every supported macOS and Linux PR/push job must:
    schemas.
 
 A competitor may be skipped only when its checked-in capability record declares
-the exact lane, operating system, architecture, or toolchain unsupported. CI
-must emit a structured skip with implementation, source revision, job, reason,
-and capability-record SHA-256 conforming to `skip.schema.json`. Missing tools,
-failed acquisition, checksum or license mismatch, compilation failure, ABI
-failure, crash, wrong acceptance, or wrong output are failures—not skips.
+the exact lane, fixture, operating system, architecture, or toolchain
+unsupported. A fixture skip must identify the exact fixture and the declared
+limit it exceeds. CI must emit a structured skip with implementation, source
+revision, job, reason, and capability-record SHA-256 conforming to
+`skip.schema.json`. Missing tools, failed acquisition, checksum or license
+mismatch, compilation failure, ABI failure, crash, wrong acceptance, or wrong
+output are failures—not skips.
 
 PR/push runners are ordinary correctness/build CI. Their short timing smoke can
 detect a broken harness or catastrophic slowdown, but shared-runner numbers are
 never added to the controlled scorecard and never gate on a single latency
 sample.
 
-## Weekly scorecards
+## Weekly directional automation
 
-Weekly CI runs the complete portable comparison matrix on controlled benchmark
-runners. It retains raw samples, capability records, source/license locks,
+The GitHub-hosted weekly workflow exercises the complete harness on macOS and
+Linux in both build tracks. Because those hosts are shared and do not satisfy
+the isolated-host protocol, it emits only directional `flyology_bench`
+distribution summaries, an exact-matrix TSV, validated structured skips, and a
+SHA-attested provenance bundle. These summaries are not `result.schema.json`
+records, do not contain raw samples, and never gate a release on latency.
+
+## Formal scorecards
+
+A future formal scheduled job runs the complete portable comparison matrix on
+controlled benchmark runners. It retains raw samples, capability records,
+source/license locks,
 Cargo lock, build logs, tool versions, host controls, fixtures, JSONL results,
 and a regression summary as durable artifacts. The summary compares only exact
 matching contract/lane/profile/fixture/chunk/track populations.
@@ -54,15 +66,18 @@ cannot fail or pass the gate. A statistically indicated regression triggers
 review of profiles, work counters, generated code, and host evidence before it
 is classified as a parser/writer regression.
 
-If a scheduled runner cannot satisfy the isolated-host protocol, the workflow
-marks its result `directional`; it does not silently publish a `formal` result.
+If a scheduled runner cannot satisfy the isolated-host protocol, it follows the
+directional workflow above; it does not silently publish a `formal` result.
 
 ## CI provenance
 
-Every emitted result records the CI trigger/provider/workflow/job/run/attempt,
+Every formal result record contains the CI trigger/provider/workflow/job/run/attempt,
 runner name and image, result URL, repository commit, executable and adapter
 digests, source and license contract digests, Cargo lock digest when applicable,
 validator, Node/npm package-manifest and tooling-lock digests,
 compiler/linker/target/flags, host controls, seeded run order, and result
 classification. Local results use trigger `local` and empty CI strings, but
-must retain the same build, source, host, and contract provenance.
+must retain the same build, source, host, and contract provenance. Directional
+summary bundles retain the available equivalents as artifact files and identify
+their classification explicitly; absence of a formal field is not encoded as a
+fabricated value.

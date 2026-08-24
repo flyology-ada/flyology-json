@@ -17,7 +17,7 @@
     },
     "native": {
       "supported": true,
-      "reason": "The portable flags add -mcpu=native on arm64/aarch64 or -march=native elsewhere."
+      "reason": "The portable flags add -mcpu=native on arm64/aarch64 or -march=native on x86_64/amd64; other native architectures fail closed."
     }
   },
   "lanes": [

@@ -1,0 +1,91 @@
+with "flyology_bench";
+with "config/flyology_json_parser_benchmarks_config.gpr";
+
+project Flyology_JSON_Comparison_Benchmarks is
+
+   type Tuning_Kind is ("portable", "native");
+   Tuning : Tuning_Kind :=
+     external ("FLYOLOGY_JSON_BENCH_TUNING", "portable");
+   Native_CPU_Switch :=
+     external ("FLYOLOGY_JSON_BENCH_NATIVE_SWITCH", "-march=native");
+   Rust_Adapter_Dir :=
+     external
+       ("RUST_ADAPTER_DIR",
+        "competitors/rust/target/" & Tuning & "/release");
+   System_Libraries :=
+     external_as_list ("FLYOLOGY_JSON_BENCH_SYSTEM_LIBRARIES", " ");
+   Native_Switches := ();
+
+   case Tuning is
+      when "portable" =>
+         Native_Switches := ();
+      when "native" =>
+         Native_Switches := (Native_CPU_Switch);
+   end case;
+
+   for Languages use ("Ada", "C", "C++");
+   for Source_Dirs use
+     ("../src",
+      "src",
+      "competitors/yyjson/src",
+      "competitors/yyjson/upstream",
+      "competitors/cpp/ada",
+      "competitors/cpp/simdjson/ada",
+      "competitors/cpp/simdjson/src",
+      "competitors/cpp/simdjson/upstream",
+      "competitors/cpp/rapidjson/ada",
+      "competitors/cpp/rapidjson/src",
+      "competitors/rust/ada");
+   for Main use ("flyology_json-comparison_benchmark.adb");
+   for Object_Dir use
+     "comparison_obj/" & Flyology_JSON_Parser_Benchmarks_Config.Build_Profile
+     & "/" & Tuning;
+   for Exec_Dir use "comparison_bin/" & Tuning;
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Flyology_JSON_Parser_Benchmarks_Config.Ada_Compiler_Switches &
+        ("-gnat2022", "-gnatwa", "-gnatwJ", "-gnatyM110") &
+        Native_Switches;
+      for Default_Switches ("C") use
+        ("-O3", "-DNDEBUG") & Native_Switches;
+      for Default_Switches ("C++") use
+        ("-std=c++17",
+         "-O3",
+         "-DNDEBUG",
+         "-Wall",
+         "-Wextra",
+         "-Werror",
+         "-I" & Project'Project_Dir & "competitors/cpp/include",
+         "-I" & Project'Project_Dir & "competitors/cpp/simdjson/upstream",
+         "-I" & Project'Project_Dir & "competitors/cpp/rapidjson/upstream/include")
+        & Native_Switches;
+      for Switches ("simdjson.cpp") use
+        ("-std=c++17",
+         "-O3",
+         "-DNDEBUG",
+         "-I" & Project'Project_Dir & "competitors/cpp/simdjson/upstream")
+        & Native_Switches;
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Linker is
+      for Switches ("flyology_json-comparison_benchmark.adb") use
+        (Rust_Adapter_Dir & "/libflyology_json_rust_bench_adapters.a",
+         "-lstdc++") & System_Libraries;
+   end Linker;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Kind ("Ada") use "spaces";
+      for Indentation_Continuation ("Ada") use "2";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
+
+end Flyology_JSON_Comparison_Benchmarks;

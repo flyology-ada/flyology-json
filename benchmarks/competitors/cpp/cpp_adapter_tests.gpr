@@ -33,6 +33,7 @@ project CPP_Adapter_Tests is
         ("-gnat2022", "-gnatwa", "-gnatwJ", "-gnatyM110", "-O2");
       for Default_Switches ("C++") use
         ("-std=c++17",
+         "-DNDEBUG",
          "-Wall",
          "-Wextra",
          "-Werror",

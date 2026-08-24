@@ -38,8 +38,8 @@ begin
          Before : constant Ada.Streams.Stream_Element_Array := Data;
          Expected_Checksum : constant Interfaces.Unsigned_64 :=
            (if Kind = Adapter.Sonic_RS
-            then 5_302_750_202_477_362_561
-            else 8_276_310_347_018_424_111);
+            then 5_624_672_763_124_767_306
+            else 9_979_358_259_564_605_272);
          Result : Adapter.Observation;
       begin
          Adapter.Parse (Kind, Data, Result);

@@ -5,6 +5,8 @@
 #include "flyology_json_cpp_bench_adapters.h"
 
 #include "rapidjson/document.h"
+#include "rapidjson/memorystream.h"
+#include "rapidjson/reader.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -71,6 +73,75 @@ void traverse(const rapidjson::Value &value, Observation &result) {
   }
 }
 
+class EventHandler final
+    : public rapidjson::BaseReaderHandler<rapidjson::UTF8<>, EventHandler> {
+public:
+  explicit EventHandler(uint64_t input_bytes)
+      : result_{UINT64_C(0xcbf29ce484222325), 0, 0, 0, input_bytes} {}
+
+  bool Null() {
+    scalar(1);
+    return true;
+  }
+  bool Bool(bool value) {
+    scalar(value ? 3 : 2);
+    return true;
+  }
+  bool Int(int) { return unexpected_converted_number(); }
+  bool Uint(unsigned) { return unexpected_converted_number(); }
+  bool Int64(int64_t) { return unexpected_converted_number(); }
+  bool Uint64(uint64_t) { return unexpected_converted_number(); }
+  bool Double(double) { return unexpected_converted_number(); }
+  bool RawNumber(const char *, rapidjson::SizeType length, bool) {
+    result_.scalar_count += 1;
+    mix_event(result_, 4, length);
+    return true;
+  }
+  bool String(const char *, rapidjson::SizeType length, bool) {
+    result_.scalar_count += 1;
+    mix_event(result_, 7, length);
+    return true;
+  }
+  bool StartObject() {
+    mix_event(result_, 10);
+    return true;
+  }
+  bool Key(const char *, rapidjson::SizeType length, bool) {
+    result_.member_name_count += 1;
+    mix_event(result_, 11, length);
+    return true;
+  }
+  bool EndObject(rapidjson::SizeType members) {
+    mix_event(result_, 12, members);
+    return true;
+  }
+  bool StartArray() {
+    mix_event(result_, 8);
+    return true;
+  }
+  bool EndArray(rapidjson::SizeType elements) {
+    mix_event(result_, 9, elements);
+    return true;
+  }
+
+  const Observation &result() const { return result_; }
+
+private:
+  void scalar(uint64_t kind) {
+    result_.scalar_count += 1;
+    mix_event(result_, kind);
+  }
+
+  static bool unexpected_converted_number() { return false; }
+
+  Observation result_;
+};
+
+rapidjson::Reader &event_reader() {
+  static thread_local rapidjson::Reader reader;
+  return reader;
+}
+
 } // namespace
 
 extern "C" int32_t flyology_json_bench_rapidjson_dom(
@@ -93,6 +164,35 @@ extern "C" int32_t flyology_json_bench_rapidjson_dom(
     Observation result = {
         UINT64_C(0xcbf29ce484222325), 0, 0, 0, length};
     traverse(document, result);
+    result.checksum ^= length;
+    *observation = result;
+    return FLYOLOGY_JSON_CPP_BENCH_OK;
+  } catch (const std::bad_alloc &) {
+    return FLYOLOGY_JSON_CPP_BENCH_ALLOCATION_FAILURE;
+  } catch (...) {
+    return FLYOLOGY_JSON_CPP_BENCH_INTERNAL_ERROR;
+  }
+}
+
+extern "C" int32_t flyology_json_bench_rapidjson_events(
+    const uint8_t *input,
+    uint64_t length,
+    Observation *observation) {
+  if (input == nullptr || observation == nullptr ||
+      length > std::numeric_limits<size_t>::max()) {
+    return FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT;
+  }
+
+  try {
+    rapidjson::MemoryStream stream(reinterpret_cast<const char *>(input),
+                                   static_cast<size_t>(length));
+    EventHandler handler(length);
+    constexpr unsigned flags = rapidjson::kParseValidateEncodingFlag |
+                               rapidjson::kParseNumbersAsStringsFlag;
+    if (!event_reader().Parse<flags>(stream, handler)) {
+      return FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR;
+    }
+    Observation result = handler.result();
     result.checksum ^= length;
     *observation = result;
     return FLYOLOGY_JSON_CPP_BENCH_OK;

@@ -51,6 +51,13 @@ case "$tuning" in
     effective_rustflags="<cleared>"
     ;;
   native)
+    case "$(uname -m)" in
+      arm64 | aarch64 | x86_64 | amd64) ;;
+      *)
+        echo "unsupported native benchmark architecture: $(uname -m)" >&2
+        exit 2
+        ;;
+    esac
     run_cargo() {
       env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
         CARGO_HOME="$cargo_home" CARGO_TARGET_DIR="$target_dir" \

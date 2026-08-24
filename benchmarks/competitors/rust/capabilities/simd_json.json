@@ -1,11 +1,11 @@
 {
-  "implementation_id": "simd-json-0.18.1-borrowed-value",
-  "display_name": "simd-json 0.18.1 BorrowedValue",
+  "implementation_id": "simd-json-0.18.1-owned-value",
+  "display_name": "simd-json 0.18.1 OwnedValue",
   "source_id": "simd-json",
   "source_revision": "registry:0.18.1",
   "boundary": {
     "kind": "coarse_rust",
-    "reason": "Rust has no stable native ABI; one whole-document staticlib call copies input, parses, and traverses BorrowedValue.",
+    "reason": "Rust has no stable native ABI; one whole-document staticlib call copies input, parses, and traverses OwnedValue.",
     "retains_input": false,
     "hidden_io": false,
     "abi_test": "tests/abi_smoke.c and tests/flyology_json-benchmark_rust_tests.adb"
@@ -13,11 +13,11 @@
   "build_tracks": {
     "portable": {
       "supported": true,
-      "reason": "Cargo release profile without target-cpu=native."
+      "reason": "Cargo release profile at opt-level 3 without LTO or target-cpu=native."
     },
     "native": {
       "supported": true,
-      "reason": "Cargo release profile with RUSTFLAGS=-C target-cpu=native."
+      "reason": "The portable release profile adds RUSTFLAGS=-C target-cpu=native and remains without LTO."
     }
   },
   "lanes": [
@@ -57,17 +57,17 @@
     {
       "lane": "parse_dom",
       "supported": true,
-      "api": "simd_json::to_borrowed_value",
+      "api": "simd_json::to_owned_value",
       "profile_ids": [
-        "simd-json-borrowed-value-default"
+        "simd-json-owned-value-default"
       ],
       "output_policy_ids": [],
-      "observable_result": "Recursive traversal checksum and visited item count are computed inside the timed call.",
+      "observable_result": "Recursive traversal checksum over kinds, container counts, and every decoded name/string byte plus visited item count, computed inside the timed call.",
       "limitations": [
         "The coarse call creates a fresh writable input copy inside every timed operation.",
         "The selected profile accepts a lone high surrogate as U+0000; profile-disagreement inputs are excluded from throughput comparisons.",
         "Recursive adapter traversal is admitted only for preflighted fixtures of depth at most 256; stack or allocator aborts are not caught.",
-        "The checksum groups every DOM number into one kind and follows simd-json object iteration order.",
+        "The order-insensitive checksum groups every DOM number into one kind and hashes every decoded name/string byte.",
         "The registry crate records upstream VCS commit 61d649d13fae83ac6d9f587863696be2741f5b8b."
       ]
     },
@@ -107,7 +107,7 @@
   ],
   "profiles": [
     {
-      "profile_id": "simd-json-borrowed-value-default",
+      "profile_id": "simd-json-owned-value-default",
       "top_level_scalars": true,
       "bom": "reject",
       "malformed_utf8": "reject",
@@ -124,7 +124,7 @@
         "Default features leave duplicate-key behavior unspecified; duplicate inputs are excluded from throughput comparisons.",
         "Depth 1024 was accepted and depth 1025 rejected by the maintained adapter test.",
         "A lone high surrogate was accepted as U+0000 while a lone low surrogate was rejected.",
-        "Exact number lexemes are not retained in BorrowedValue."
+        "Exact number lexemes are not retained in OwnedValue."
       ]
     }
   ],

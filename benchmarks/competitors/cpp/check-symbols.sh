@@ -37,6 +37,7 @@ nm -g "$executable" \
 
 cat >"$temporary/expected" <<'SYMBOLS'
 flyology_json_bench_rapidjson_dom
+flyology_json_bench_rapidjson_events
 flyology_json_bench_simdjson_dom
 flyology_json_bench_simdjson_padding
 SYMBOLS

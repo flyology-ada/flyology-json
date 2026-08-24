@@ -1,11 +1,11 @@
 {
-  "implementation_id": "rapidjson-24b5e7a8-coarse-cpp-dom",
-  "display_name": "RapidJSON 24b5e7a8 DOM",
+  "implementation_id": "rapidjson-24b5e7a8-coarse-cpp-parser",
+  "display_name": "RapidJSON 24b5e7a8 SAX and DOM",
   "source_id": "rapidjson",
   "source_revision": "24b5e7a8b27f42fa16b96fc70aade9106cf7102f",
   "boundary": {
     "kind": "coarse_cpp",
-    "reason": "RapidJSON's GenericDocument parser and traversal API are C++; one extern C call translates the completed observation into a fixed-width record.",
+    "reason": "RapidJSON's Reader and GenericDocument APIs are C++; one coarse extern C call per admitted lane translates the completed observation into a fixed-width record.",
     "retains_input": false,
     "hidden_io": false,
     "abi_test": "test.sh checks C and Ada layout, symbols, nullability, ownership, arbitrary Ada bounds, strictness, and failure publication."
@@ -13,11 +13,11 @@
   "build_tracks": {
     "portable": {
       "supported": true,
-      "reason": "C++17 with -O3 and no host-specific ISA compile flag."
+      "reason": "C++17 with -O3 and NDEBUG, without a host-specific ISA compile flag."
     },
     "native": {
       "supported": true,
-      "reason": "The portable flags add -mcpu=native on arm64/aarch64 and -march=native elsewhere."
+      "reason": "The portable release flags add -mcpu=native on arm64/aarch64 or -march=native on x86_64/amd64; other native architectures fail closed."
     }
   },
   "lanes": [
@@ -32,12 +32,17 @@
     },
     {
       "lane": "parse_events",
-      "supported": false,
-      "api": "not exposed by this adapter",
-      "profile_ids": [],
+      "supported": true,
+      "api": "flyology_json_bench_rapidjson_events uses Reader::Parse with kParseValidateEncodingFlag and kParseNumbersAsStringsFlag.",
+      "profile_ids": ["rapidjson-sax-exact-number-spans-24b5e7a8"],
       "output_policy_ids": [],
-      "observable_result": "not available",
-      "limitations": ["The adapter deliberately uses the ordinary owned DOM API rather than presenting DOM traversal as a streaming event API."]
+      "observable_result": "Checksum over event kinds, decoded name/string lengths, exact number-span lengths, and container counts plus event, scalar, member-name, and exact input-byte counters.",
+      "limitations": [
+        "The Reader consumes one complete contiguous input rather than an incremental chunk schedule.",
+        "Names and strings are decoded only for callback-scoped observation; no DOM is constructed.",
+        "One Reader is reused per calling thread; fixture preflight grows its decoded-string stack before measurement.",
+        "An initial UTF-8 BOM is rejected by the admitted Reader flags."
+      ]
     },
     {
       "lane": "parse_incremental",
@@ -90,6 +95,26 @@
     }
   ],
   "profiles": [
+    {
+      "profile_id": "rapidjson-sax-exact-number-spans-24b5e7a8",
+      "top_level_scalars": true,
+      "bom": "reject",
+      "malformed_utf8": "reject",
+      "unpaired_surrogates": "reject",
+      "duplicate_names": "preserve_all",
+      "comments": false,
+      "trailing_commas": false,
+      "raw_controls": false,
+      "nonstandard_numbers": false,
+      "nonfinite_numbers": false,
+      "number_handling": "exact_lexeme",
+      "maximum_depth": null,
+      "other_limits": [
+        "Input size is bounded by size_t and available native-stack resources.",
+        "A zero-length document is rejected.",
+        "The callback observes each exact number span only for the duration of the call and does not retain it."
+      ]
+    },
     {
       "profile_id": "rapidjson-dom-validate-encoding-24b5e7a8",
       "top_level_scalars": true,

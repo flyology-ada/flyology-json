@@ -5,15 +5,16 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_root=$(CDPATH= cd -- "$root/../../../.." && pwd)
 destination="$root/upstream"
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/flyology-json-rapidjson.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 revision=24b5e7a8b27f42fa16b96fc70aade9106cf7102f
 prefix="rapidjson-$revision"
-archive="$temporary/source.tar.gz"
+cache_dir=${FLYOLOGY_JSON_BENCH_SOURCE_CACHE:-/tmp/flyology-json-benchmark-sources}
+archive="$cache_dir/rapidjson-24b5e7a8.tar.gz"
 staging="$temporary/materialized"
-url="https://github.com/Tencent/rapidjson/archive/$revision.tar.gz"
 
 digest()
 {
@@ -24,7 +25,9 @@ digest()
     fi
 }
 
-curl -fsSL "$url" -o "$archive"
+if [ ! -f "$archive" ]; then
+    "$project_root/scripts/verify-benchmark-sources.sh" "$cache_dir"
+fi
 
 if [ "$(wc -c < "$archive" | tr -d ' ')" != 1116703 ]; then
     echo "RapidJSON archive byte count does not match sources.lock.tsv" >&2

@@ -41,18 +41,18 @@ int main(void) {
   size_t items = 0;
 
   if (check_read_only(flyology_json_bench_serde_json_traverse,
-                      UINT64_C(8276310347018424111)) != 0) {
+                      UINT64_C(9979358259564605272)) != 0) {
     return 10;
   }
   if (check_read_only(flyology_json_bench_sonic_rs_traverse,
-                      UINT64_C(5302750202477362561)) != 0) {
+                      UINT64_C(5624672763124767306)) != 0) {
     return 20;
   }
 
   if (flyology_json_bench_simd_json_traverse(
-          source, sizeof(source) - 1, &checksum, &items) !=
+      source, sizeof(source) - 1, &checksum, &items) !=
           FLYOLOGY_JSON_RUST_BENCH_OK ||
-      checksum != UINT64_C(8276310347018424111) || items != 10) {
+      checksum != UINT64_C(9979358259564605272) || items != 10) {
     return 30;
   }
 

@@ -65,14 +65,15 @@
     "unsupported": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["reason", "os", "architecture", "toolchain", "lane"],
+      "required": ["reason", "os", "architecture", "toolchain", "lane", "fixture"],
       "properties": {
         "reason": {
           "enum": [
             "unsupported_os",
             "unsupported_architecture",
             "unsupported_toolchain",
-            "unsupported_lane"
+            "unsupported_lane",
+            "unsupported_fixture"
           ]
         },
         "os": { "type": ["string", "null"] },
@@ -93,7 +94,8 @@
             },
             { "type": "null" }
           ]
-        }
+        },
+        "fixture": { "type": ["string", "null"] }
       }
     },
     "detail": { "type": "string", "minLength": 1 }
@@ -186,6 +188,39 @@
                   "parse_write"
                 ]
               }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "unsupported": {
+            "type": "object",
+            "properties": { "reason": { "const": "unsupported_fixture" } }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "unsupported": {
+            "type": "object",
+            "properties": {
+              "lane": {
+                "enum": [
+                  "parse_validate",
+                  "parse_events",
+                  "parse_incremental",
+                  "parse_dom",
+                  "write_stream",
+                  "write_dom",
+                  "parse_write"
+                ]
+              },
+              "fixture": { "type": "string", "minLength": 1 }
             }
           }
         }

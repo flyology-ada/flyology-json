@@ -13,11 +13,11 @@
   "build_tracks": {
     "portable": {
       "supported": true,
-      "reason": "Cargo release profile without target-cpu=native."
+      "reason": "Cargo release profile at opt-level 3 without LTO or target-cpu=native."
     },
     "native": {
       "supported": true,
-      "reason": "Cargo release profile with RUSTFLAGS=-C target-cpu=native."
+      "reason": "The portable release profile adds RUSTFLAGS=-C target-cpu=native and remains without LTO."
     }
   },
   "lanes": [
@@ -62,11 +62,11 @@
         "serde_json-value-default"
       ],
       "output_policy_ids": [],
-      "observable_result": "Recursive traversal checksum and visited item count are computed inside the timed call.",
+      "observable_result": "Recursive traversal checksum over kinds, container counts, and every decoded name/string byte plus visited item count, computed inside the timed call.",
       "limitations": [
         "The default features omit arbitrary_precision and unbounded_depth.",
         "Recursive adapter traversal is admitted only for preflighted fixtures of depth at most 256; stack or allocator aborts are not caught.",
-        "The checksum distinguishes signed, unsigned, and floating DOM numbers and follows serde_json Map iteration order.",
+        "The order-insensitive checksum distinguishes signed, unsigned, and floating DOM number kinds and hashes every decoded name/string byte.",
         "The registry crate records upstream VCS commit de8500740cdcabffb9734f503e4889def823cf10."
       ]
     },

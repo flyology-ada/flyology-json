@@ -22,6 +22,8 @@ value-count fields so the parsed result remains observable.
 
 ```sh
 ./test.sh
+./test.sh portable
+./test.sh native
 ```
 
 `test.sh` is the maintained setup/build/smoke entrypoint for local and CI
@@ -33,8 +35,10 @@ The GPR scenario variable `FLYOLOGY_JSON_BENCH_TRACK` selects `portable` or
 `native` and places objects and executables in distinct track directories.
 Portable release compilation uses `-O3 -gnatn -gnatp` for Ada and
 `-O3 -DNDEBUG` for C. Native compilation adds `-mcpu=native` on arm64/aarch64
-or `-march=native` on other maintained CI hosts. `test.sh` builds and runs both
-tracks, but its success is build and ABI evidence, not timing evidence. Formal
+or `-march=native` on x86_64/amd64; other native architectures fail closed.
+With no argument, `test.sh` builds and runs both tracks, but its success is
+build and ABI evidence, not
+timing evidence. Formal
 timing still follows the shared isolated-host protocol.
 
 `acquire.sh` first runs the shared `scripts/verify-benchmark-sources.sh`

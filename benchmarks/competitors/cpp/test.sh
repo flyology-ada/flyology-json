@@ -26,7 +26,11 @@ case "$tuning" in
     native)
         case "$(uname -m)" in
             arm64 | aarch64) cpu_switch=-mcpu=native ;;
-            *) cpu_switch=-march=native ;;
+            x86_64 | amd64) cpu_switch=-march=native ;;
+            *)
+                echo "unsupported native benchmark architecture: $(uname -m)" >&2
+                exit 2
+                ;;
         esac
         ;;
     *)
@@ -53,7 +57,7 @@ esac
 
 build="$root/build/$tuning"
 mkdir -p "$build"
-cxx_flags="-std=c++17 -O3"
+cxx_flags="-std=c++17 -O3 -DNDEBUG"
 if [ -n "$cpu_switch" ]; then
     cxx_flags="$cxx_flags $cpu_switch"
 fi

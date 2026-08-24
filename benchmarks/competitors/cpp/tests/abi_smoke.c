@@ -48,17 +48,20 @@ static int rapidjson_status(const uint8_t *input, size_t length) {
       input, (uint64_t)length, &observation);
 }
 
+static int rapidjson_events_status(const uint8_t *input, size_t length) {
+  struct flyology_json_cpp_bench_observation observation;
+  return flyology_json_bench_rapidjson_events(
+      input, (uint64_t)length, &observation);
+}
+
 static int expect_both(const uint8_t *input, size_t length, int32_t status) {
   return simdjson_status(input, length) == status &&
-         rapidjson_status(input, length) == status;
+         rapidjson_status(input, length) == status &&
+         rapidjson_events_status(input, length) == status;
 }
 
 static int expect_simdjson(const uint8_t *input, size_t length, int32_t status) {
   return simdjson_status(input, length) == status;
-}
-
-static int expect_rapidjson(const uint8_t *input, size_t length, int32_t status) {
-  return rapidjson_status(input, length) == status;
 }
 
 int main(void) {
@@ -78,11 +81,14 @@ int main(void) {
   uint8_t original[sizeof(padded)];
   struct flyology_json_cpp_bench_observation simd = {17, 19, 23, 29, 31};
   struct flyology_json_cpp_bench_observation rapid = {17, 19, 23, 29, 31};
+  struct flyology_json_cpp_bench_observation events = {17, 19, 23, 29, 31};
   simdjson_function simd_symbol = flyology_json_bench_simdjson_dom;
   rapidjson_function rapid_symbol = flyology_json_bench_rapidjson_dom;
+  rapidjson_function events_symbol = flyology_json_bench_rapidjson_events;
   const uint64_t padding = flyology_json_bench_simdjson_padding();
 
-  if (simd_symbol == NULL || rapid_symbol == NULL || padding != 64) {
+  if (simd_symbol == NULL || rapid_symbol == NULL || events_symbol == NULL ||
+      padding != 64) {
     return 1;
   }
   memcpy(padded, valid, sizeof(valid) - 1);
@@ -93,9 +99,13 @@ int main(void) {
           FLYOLOGY_JSON_CPP_BENCH_OK ||
       rapid_symbol(valid, sizeof(valid) - 1, &rapid) !=
           FLYOLOGY_JSON_CPP_BENCH_OK ||
+      events_symbol(valid, sizeof(valid) - 1, &events) !=
+          FLYOLOGY_JSON_CPP_BENCH_OK ||
       simd.checksum != rapid.checksum || simd.event_count != 10 ||
       simd.scalar_count != 5 || simd.member_name_count != 1 ||
-      simd.input_bytes != sizeof(valid) - 1 ||
+      simd.input_bytes != sizeof(valid) - 1 || events.event_count != 10 ||
+      events.scalar_count != 5 || events.member_name_count != 1 ||
+      events.input_bytes != sizeof(valid) - 1 ||
       memcmp(padded, original, sizeof(padded)) != 0) {
     return 2;
   }
@@ -111,6 +121,7 @@ int main(void) {
 
   memset(padded, 0, sizeof(padded));
   memcpy(padded, malformed, sizeof(malformed) - 1);
+  events = rapid;
   if (simd_symbol(padded, sizeof(malformed) - 1,
                   sizeof(malformed) - 1 + padding, &simd) !=
           FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR ||
@@ -119,7 +130,10 @@ int main(void) {
           FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR ||
       rapid.checksum != 17 || rapid.event_count != 19 ||
       rapid.scalar_count != 23 || rapid.member_name_count != 29 ||
-      rapid.input_bytes != 31) {
+      rapid.input_bytes != 31 ||
+      events_symbol(malformed, sizeof(malformed) - 1, &events) !=
+          FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR ||
+      memcmp(&events, &rapid, sizeof(events)) != 0) {
     return 4;
   }
 
@@ -127,30 +141,63 @@ int main(void) {
           FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT ||
       rapid_symbol(NULL, 0, &rapid) !=
           FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT ||
+      events_symbol(NULL, 0, &events) !=
+          FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT ||
       simd_symbol(padded, 1, sizeof(padded), NULL) !=
           FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT ||
       rapid_symbol(valid, sizeof(valid) - 1, NULL) !=
+          FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT ||
+      events_symbol(valid, sizeof(valid) - 1, NULL) !=
           FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT) {
     return 5;
   }
 
-  if (!expect_both((const uint8_t *)"null", 4, FLYOLOGY_JSON_CPP_BENCH_OK) ||
-      !expect_both(duplicate, sizeof(duplicate) - 1, FLYOLOGY_JSON_CPP_BENCH_OK) ||
-      !expect_simdjson(bom, sizeof(bom) - 1, FLYOLOGY_JSON_CPP_BENCH_OK) ||
-      !expect_rapidjson(bom, sizeof(bom) - 1, FLYOLOGY_JSON_CPP_BENCH_OK) ||
-      !expect_both(bad_utf8, sizeof(bad_utf8), FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR) ||
-      !expect_both(raw_control, sizeof(raw_control), FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR) ||
-      !expect_both(unpaired, sizeof(unpaired) - 1, FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR) ||
-      !expect_both(comment, sizeof(comment) - 1, FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR) ||
-      !expect_both(trailing_comma, sizeof(trailing_comma) - 1,
-                   FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR) ||
-      !expect_both(leading_plus, sizeof(leading_plus) - 1,
-                   FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR) ||
-      !expect_both(leading_zero, sizeof(leading_zero) - 1,
-                   FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR) ||
-      !expect_both(nonfinite, sizeof(nonfinite) - 1,
+  if (!expect_both((const uint8_t *)"null", 4, FLYOLOGY_JSON_CPP_BENCH_OK)) {
+    return 60;
+  }
+  if (!expect_both(duplicate, sizeof(duplicate) - 1,
+                   FLYOLOGY_JSON_CPP_BENCH_OK)) {
+    return 61;
+  }
+  if (!expect_simdjson(bom, sizeof(bom) - 1,
+                       FLYOLOGY_JSON_CPP_BENCH_OK) ||
+      rapidjson_status(bom, sizeof(bom) - 1) !=
+          FLYOLOGY_JSON_CPP_BENCH_OK ||
+      rapidjson_events_status(bom, sizeof(bom) - 1) !=
+          FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR) {
+    return 62;
+  }
+  if (!expect_both(bad_utf8, sizeof(bad_utf8),
                    FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR)) {
-    return 6;
+    return 63;
+  }
+  if (!expect_both(raw_control, sizeof(raw_control),
+                   FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR)) {
+    return 64;
+  }
+  if (!expect_both(unpaired, sizeof(unpaired) - 1,
+                   FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR)) {
+    return 65;
+  }
+  if (!expect_both(comment, sizeof(comment) - 1,
+                   FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR)) {
+    return 66;
+  }
+  if (!expect_both(trailing_comma, sizeof(trailing_comma) - 1,
+                   FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR)) {
+    return 67;
+  }
+  if (!expect_both(leading_plus, sizeof(leading_plus) - 1,
+                   FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR)) {
+    return 68;
+  }
+  if (!expect_both(leading_zero, sizeof(leading_zero) - 1,
+                   FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR)) {
+    return 69;
+  }
+  if (!expect_both(nonfinite, sizeof(nonfinite) - 1,
+                   FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR)) {
+    return 70;
   }
 
   return 0;

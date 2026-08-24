@@ -3,6 +3,20 @@ with "config/flyology_json_parser_benchmarks_config.gpr";
 
 project Flyology_JSON_Parser_Benchmarks is
 
+   type Tuning_Kind is ("portable", "native");
+   Tuning : Tuning_Kind :=
+     external ("FLYOLOGY_JSON_BENCH_TUNING", "portable");
+   Native_CPU_Switch :=
+     external ("FLYOLOGY_JSON_BENCH_NATIVE_SWITCH", "-march=native");
+   Ada_Tuning_Switches := ();
+
+   case Tuning is
+      when "portable" =>
+         Ada_Tuning_Switches := ();
+      when "native" =>
+         Ada_Tuning_Switches := (Native_CPU_Switch);
+   end case;
+
    for Source_Dirs use ("../src", "src");
    for Main use ("flyology_json-parser_benchmark.adb");
    for Object_Dir use
@@ -13,7 +27,8 @@ project Flyology_JSON_Parser_Benchmarks is
    package Compiler is
       for Default_Switches ("Ada") use
         Flyology_JSON_Parser_Benchmarks_Config.Ada_Compiler_Switches &
-        ("-gnat2022", "-gnatwa", "-gnatwJ", "-gnatyM110");
+        ("-gnat2022", "-gnatwa", "-gnatwJ", "-gnatyM110") &
+        Ada_Tuning_Switches;
    end Compiler;
 
    package Binder is

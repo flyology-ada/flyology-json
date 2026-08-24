@@ -100,7 +100,11 @@ extern "C" int32_t flyology_json_bench_simdjson_dom(
   }
 
   try {
-    simdjson::dom::parser parser;
+    //  The maintained harness performs one untimed preflight call for each
+    //  population.  Reusing this thread-local parser keeps its ordinary DOM
+    //  buffers outside subsequent timed initialization and cleanup while
+    //  retaining no caller input.
+    static thread_local simdjson::dom::parser parser;
     simdjson::dom::element document;
     const simdjson::error_code error =
         parser.parse(input, static_cast<size_t>(length), false).get(document);
