@@ -1,0 +1,61 @@
+project YYJSON_Adapter_Tests is
+
+   type Build_Track_Kind is ("portable", "native");
+   Build_Track : Build_Track_Kind :=
+     external ("FLYOLOGY_JSON_BENCH_TRACK", "portable");
+
+   type Native_CPU_Flag_Kind is ("march_native", "mcpu_native");
+   Native_CPU_Flag : Native_CPU_Flag_Kind :=
+     external ("FLYOLOGY_JSON_BENCH_NATIVE_CPU_FLAG", "march_native");
+
+   for Languages use ("Ada", "C");
+   for Source_Dirs use ("../../../src", "src", "tests", "upstream");
+   for Main use ("flyology_json-benchmark_yyjson_tests.adb");
+   for Object_Dir use "obj/" & Build_Track;
+   for Exec_Dir use "bin/" & Build_Track;
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      case Build_Track is
+         when "portable" =>
+            for Default_Switches ("Ada") use
+              ("-gnat2022", "-gnatwa", "-gnatwJ", "-gnatyM110",
+               "-O3", "-gnatn", "-gnatp");
+            for Default_Switches ("C") use
+              ("-std=c11", "-Wall", "-Wextra", "-Werror", "-O3", "-DNDEBUG");
+
+         when "native" =>
+            case Native_CPU_Flag is
+               when "march_native" =>
+                  for Default_Switches ("Ada") use
+                    ("-gnat2022", "-gnatwa", "-gnatwJ", "-gnatyM110",
+                     "-O3", "-gnatn", "-gnatp", "-march=native");
+                  for Default_Switches ("C") use
+                    ("-std=c11", "-Wall", "-Wextra", "-Werror",
+                     "-O3", "-DNDEBUG", "-march=native");
+
+               when "mcpu_native" =>
+                  for Default_Switches ("Ada") use
+                    ("-gnat2022", "-gnatwa", "-gnatwJ", "-gnatyM110",
+                     "-O3", "-gnatn", "-gnatp", "-mcpu=native");
+                  for Default_Switches ("C") use
+                    ("-std=c11", "-Wall", "-Wextra", "-Werror",
+                     "-O3", "-DNDEBUG", "-mcpu=native");
+            end case;
+      end case;
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Kind ("Ada") use "spaces";
+      for Indentation_Continuation ("Ada") use "2";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
+
+end YYJSON_Adapter_Tests;

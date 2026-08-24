@@ -1,0 +1,125 @@
+{
+  "implementation_id": "yyjson-0.12.0-direct-c",
+  "display_name": "yyjson 0.12.0",
+  "source_id": "yyjson",
+  "source_revision": "8b4a38dc994a110abaec8a400615567bd996105f",
+  "boundary": {
+    "kind": "direct_c",
+    "reason": "Ada imports yyjson_read_opts directly; one C function wraps inline document cleanup.",
+    "retains_input": false,
+    "hidden_io": false,
+    "abi_test": "test.sh checks C/Ada sizes and offsets, linked symbols, errors, and document ownership."
+  },
+  "build_tracks": {
+    "portable": {
+      "supported": true,
+      "reason": "Ada uses -O3 -gnatn -gnatp; C uses -O3 -DNDEBUG without host ISA flags."
+    },
+    "native": {
+      "supported": true,
+      "reason": "The portable flags add -mcpu=native on arm64/aarch64 or -march=native elsewhere."
+    }
+  },
+  "lanes": [
+    {
+      "lane": "parse_validate",
+      "supported": true,
+      "api": "Flyology_JSON.Benchmark_YYJSON.Parse calls yyjson_read_opts with zero flags.",
+      "profile_ids": ["yyjson-read-zero-flags"],
+      "output_policy_ids": [],
+      "observable_result": "Status plus a checksum of read bytes, value count, error code, and byte offset.",
+      "limitations": [
+        "The fastest complete-document reader constructs and frees an allocating DOM.",
+        "The adapter does not copy or pad input; yyjson allocates its DOM and string storage internally.",
+        "Number conversion and per-operation document cleanup are included in timed work.",
+        "Only a complete contiguous input is accepted; chunk schedules are not supported."
+      ]
+    },
+    {
+      "lane": "parse_events",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["The adapter does not expose a complete token-visit API."]
+    },
+    {
+      "lane": "parse_incremental",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["The approved adapter is intentionally a coarse whole-document boundary."]
+    },
+    {
+      "lane": "parse_dom",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": [
+        "The adapter does not perform the parse_dom lane's required recursive value checksum."
+      ]
+    },
+    {
+      "lane": "write_stream",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["No yyjson writer boundary is included in this adapter."]
+    },
+    {
+      "lane": "write_dom",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["No yyjson writer boundary is included in this adapter."]
+    },
+    {
+      "lane": "parse_write",
+      "supported": false,
+      "api": "not exposed by this adapter",
+      "profile_ids": [],
+      "output_policy_ids": [],
+      "observable_result": "not available",
+      "limitations": ["No combined yyjson parse-and-write boundary is included in this adapter."]
+    }
+  ],
+  "profiles": [
+    {
+      "profile_id": "yyjson-read-zero-flags",
+      "top_level_scalars": true,
+      "bom": "reject",
+      "malformed_utf8": "reject",
+      "unpaired_surrogates": "reject",
+      "duplicate_names": "preserve_all",
+      "comments": false,
+      "trailing_commas": false,
+      "raw_controls": false,
+      "nonstandard_numbers": false,
+      "nonfinite_numbers": false,
+      "number_handling": "lossy_conversion",
+      "maximum_depth": null,
+      "other_limits": [
+        "A zero-length input is rejected.",
+        "DOM size is bounded by size_t, address space, and allocator capacity."
+      ]
+    }
+  ],
+  "output_policies": [],
+  "memory": {
+    "input_access": "read_only",
+    "required_readable_padding_octets": 0,
+    "required_writable_padding_octets": 0,
+    "copy_policy": "none",
+    "allocation_reporting": "unavailable",
+    "peak_memory_reporting": "process_rss"
+  }
+}
