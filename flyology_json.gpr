@@ -1,0 +1,37 @@
+with "config/flyology_json_config.gpr";
+
+project Flyology_JSON is
+
+   for Library_Name use "Flyology_JSON";
+   for Library_Version use Project'Library_Name & ".so." & Flyology_JSON_Config.Crate_Version;
+
+   for Source_Dirs use ("src/", "config/");
+   for Object_Dir use "obj/" & Flyology_JSON_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
+   for Library_Dir use "lib";
+
+   type Library_Type_Type is ("relocatable", "static", "static-pic");
+   Library_Type : Library_Type_Type :=
+     external ("FLYOLOGY_JSON_LIBRARY_TYPE", external ("LIBRARY_TYPE", "static"));
+   for Library_Kind use Library_Type;
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Flyology_JSON_Config.Ada_Compiler_Switches &
+        ("-gnatyM110", "-gnat2022");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Kind ("Ada") use "spaces";
+      for Indentation_Continuation ("Ada") use "2";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
+
+end Flyology_JSON;

@@ -1,0 +1,15 @@
+
+# Build and generated output
+**/obj/
+**/lib/
+**/alire/
+**/config/
+**/bin/
+build/
+docs/api/
+
+# Generated agent packages and caches
+.agents/
+.claude/rules/
+.claude/skills/
+apm_modules/
