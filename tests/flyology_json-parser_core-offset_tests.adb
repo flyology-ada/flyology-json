@@ -14,6 +14,18 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end if;
    end Check;
 
+   function To_Input
+     (Text : String;
+      First : Offset) return Ada.Streams.Stream_Element_Array is
+      Result : Ada.Streams.Stream_Element_Array
+        (First .. First + Offset (Text'Length) - 1);
+   begin
+      for Position in Text'Range loop
+         Result (First + Offset (Position - Text'First)) := Character'Pos (Text (Position));
+      end loop;
+      return Result;
+   end To_Input;
+
    procedure Drain_Reused_Parser (Self : in out Parser) is
       Input  : constant Ada.Streams.Stream_Element_Array :=
         [Offset (-7) => Character'Pos ('n'),
@@ -46,6 +58,140 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       Check (Result.Outcome = Document_Complete, "reset parser did not complete a new document");
       Check (Used = Input'Length, "reset parser did not consume the complete new document");
    end Drain_Reused_Parser;
+
+   procedure Begin_At (Self : in out Parser; At_Offset : Byte_Offset) is
+      Begin_Result : Next_Result;
+      No_Input     : Ada.Streams.Stream_Element_Array (1 .. 0);
+   begin
+      Initialize (Self);
+      Next (Self, No_Input, False, Begin_Result);
+      Check (Begin_Result.Outcome = Event_Ready, "literal offset setup omitted document begin");
+      Self.Next_Offset := At_Offset;
+   end Begin_At;
+
+   procedure Check_Literal_Offset_Boundaries is
+   begin
+      declare
+         Subject : Parser (0, 0, 0);
+         Input  : constant Ada.Streams.Stream_Element_Array :=
+           [Offset (-11) => Character'Pos ('n'),
+            Offset (-10) => Character'Pos ('u'),
+            Offset (-9)  => Character'Pos ('l'),
+            Offset (-8)  => Character'Pos ('l')];
+         Item   : Next_Result;
+      begin
+         Begin_At (Subject, Byte_Offset'Last - 4);
+         Next (Subject, Input, True, Item);
+         Check (Item.Outcome = Event_Ready, "literal ending at Last was rejected");
+         Check (Item.Item.Kind = Null_Value, "literal ending at Last emitted the wrong event");
+         Check (Item.Consumed = 4, "literal ending at Last changed its consumed count");
+         Check (Subject.Next_Offset = Byte_Offset'Last, "literal ending at Last changed its offset");
+      end;
+
+      declare
+         Subject : Parser (0, 0, 0);
+         Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("null", -13);
+         Item   : Next_Result;
+      begin
+         Begin_At (Subject, Byte_Offset'Last - 3);
+         Next (Subject, Input, True, Item);
+         Check (Item.Outcome = Parse_Failed, "unrepresentable literal byte was accepted");
+         Check (Item.Consumed = 3, "offset denial consumed the literal's denied byte");
+         Check (Item.Diagnostic.Code = Offset_Exhausted, "literal offset denial changed status");
+         Check (Item.Diagnostic.Offset = Byte_Offset'Last, "literal offset denial moved");
+      end;
+
+      declare
+         Subject : Parser (0, 0, 0);
+         Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("false", -17);
+         Item    : Next_Result;
+      begin
+         Begin_At (Subject, Byte_Offset'Last - 5);
+         Next (Subject, Input, True, Item);
+         Check (Item.Outcome = Event_Ready, "five-byte literal ending at Last was rejected");
+         Check (Item.Item.Kind = Boolean_Value, "five-byte literal emitted the wrong event");
+         Check (not Item.Item.Boolean_Data, "false literal changed its Boolean value");
+         Check (Item.Consumed = 5, "five-byte literal changed its consumed count");
+         Check
+           (Subject.Next_Offset = Byte_Offset'Last,
+            "five-byte literal ending at Last changed its offset");
+      end;
+
+      declare
+         Subject : Parser (0, 0, 0);
+         Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("false", -21);
+         Item    : Next_Result;
+      begin
+         Begin_At (Subject, Byte_Offset'Last - 4);
+         Next (Subject, Input, True, Item);
+         Check (Item.Outcome = Parse_Failed, "five-byte literal exceeded Last");
+         Check (Item.Consumed = 4, "five-byte denial consumed the denied byte");
+         Check (Item.Diagnostic.Code = Offset_Exhausted, "five-byte denial changed status");
+         Check (Item.Diagnostic.Offset = Byte_Offset'Last, "five-byte denial moved");
+      end;
+
+      declare
+         Subject : Parser (0, 0, 0);
+         Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("nXll", 19);
+         Item   : Next_Result;
+      begin
+         Begin_At (Subject, Byte_Offset'Last - 4);
+         Next (Subject, Input, True, Item);
+         Check (Item.Outcome = Parse_Failed, "literal mismatch before Last was accepted");
+         Check (Item.Consumed = 2, "literal mismatch changed its consumed count");
+         Check (Item.Diagnostic.Code = Invalid_Literal, "literal mismatch changed status");
+         Check
+           (Item.Diagnostic.Offset = Byte_Offset'Last - 3,
+            "literal mismatch changed its exact offset");
+      end;
+
+      declare
+         Subject : Parser (0, 0, 0);
+         Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("nulX", 23);
+         Item   : Next_Result;
+      begin
+         Begin_At (Subject, Byte_Offset'Last - 3);
+         Next (Subject, Input, True, Item);
+         Check (Item.Outcome = Parse_Failed, "denied mismatching literal byte was accepted");
+         Check (Item.Consumed = 3, "denied mismatch consumed the unrepresentable byte");
+         Check (Item.Diagnostic.Code = Offset_Exhausted, "denied mismatch lost offset precedence");
+         Check (Item.Diagnostic.Offset = Byte_Offset'Last, "denied mismatch moved the offset");
+      end;
+
+      declare
+         Subject : Parser (0, 0, 0);
+         Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("nullx", -31);
+         Item    : Next_Result;
+      begin
+         Begin_At (Subject, Byte_Offset'Last - 4);
+         Next (Subject, Input, True, Item);
+         Check (Item.Outcome = Parse_Failed, "invalid suffix beyond Last was accepted");
+         Check (Item.Consumed = 4, "invalid suffix beyond Last consumed the denied byte");
+         Check (Item.Diagnostic.Code = Offset_Exhausted, "invalid suffix changed status");
+         Check (Item.Diagnostic.Offset = Byte_Offset'Last, "invalid suffix moved");
+      end;
+
+      declare
+         Subject : Parser (0, 0, 0);
+         Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("null ", -37);
+         Item    : Next_Result;
+      begin
+         Begin_At (Subject, Byte_Offset'Last - 4);
+         Next (Subject, Input, True, Item);
+         Check (Item.Outcome = Event_Ready, "legal literal lookahead was not provisional");
+         Check (Item.Item.Kind = Null_Value, "legal literal lookahead changed the value");
+         Check (Item.Consumed = 4, "legal literal lookahead consumed its delimiter");
+         Next (Subject, Input (Input'Last .. Input'Last), True, Item);
+         Check (Item.Outcome = Event_Ready, "literal at Last omitted document end");
+         Check (Item.Item.Kind = Document_End, "literal at Last changed document-end ordering");
+         Check (Item.Consumed = 0, "document end consumed the delimiter beyond Last");
+         Next (Subject, Input (Input'Last .. Input'Last), True, Item);
+         Check (Item.Outcome = Parse_Failed, "delimiter beyond Last was accepted");
+         Check (Item.Consumed = 0, "delimiter beyond Last was consumed");
+         Check (Item.Diagnostic.Code = Offset_Exhausted, "delimiter beyond Last changed status");
+         Check (Item.Diagnostic.Offset = Byte_Offset'Last, "delimiter beyond Last moved");
+      end;
+   end Check_Literal_Offset_Boundaries;
 
    --  Explicit storage for the reset fixture; these values are not defaults.
    Self       : Parser (1, 16, 4);
@@ -94,4 +240,5 @@ begin
    Check (State (Self) = Ready, "offset-exhausted parser did not reset");
    Check (Self.Next_Offset = 0, "reset did not restore the source origin");
    Drain_Reused_Parser (Self);
+   Check_Literal_Offset_Boundaries;
 end Flyology_JSON.Parser_Core.Offset_Tests;

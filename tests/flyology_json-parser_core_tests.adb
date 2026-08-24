@@ -8,6 +8,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
 
    use type Ada.Streams.Stream_Element_Count;
    use type Core.Byte_Offset;
+   use type Core.Chunk_Range;
    use type Core.Decoded_Fragment_Kind;
    use type Core.Diagnostic;
    use type Core.Error_Code;
@@ -425,7 +426,11 @@ procedure Flyology_JSON.Parser_Core_Tests is
       return Seen;
    end Parse_Randomized;
 
-   function Parse_Partition (Text : String; Boundaries : Interfaces.Unsigned_32) return Observation is
+   function Parse_Partition
+     (Text          : String;
+      Boundaries    : Interfaces.Unsigned_32;
+      Allow_Failure : Boolean := False) return Observation
+   is
       Parser      : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity);
       Seen        : Observation;
       Chunk_First : Natural := 0;
@@ -452,6 +457,9 @@ procedure Flyology_JSON.Parser_Core_Tests is
                   Position = Text'Length - 1,
                   Seen);
                if Position < Text'Length - 1 then
+                  if Allow_Failure and then Seen.Outcome = Core.Parse_Failed then
+                     return Seen;
+                  end if;
                   Check (Seen.Outcome = Core.Need_Input, "partition schedule terminated early");
                end if;
             end;
@@ -582,7 +590,35 @@ procedure Flyology_JSON.Parser_Core_Tests is
             Check (Seen.Diagnostic.Offset = At_Byte, "random schedule changed the error offset");
          end;
       end loop;
+
    end Check_Invalid;
+
+   procedure Check_Invalid_Literal
+     (Text    : String;
+      Code    : Core.Error_Code;
+      At_Byte : Core.Byte_Offset)
+   is
+      Longest_JSON_Literal : constant String := "false";
+   begin
+      Check_Invalid (Text, Code, At_Byte);
+      Check
+        (Text'Length in 1 .. Longest_JSON_Literal'Length,
+         "literal partition fixture exceeds the longest JSON literal");
+      declare
+         Last_Mask : constant Interfaces.Unsigned_32 :=
+           Interfaces.Shift_Left (1, Text'Length - 1) - 1;
+      begin
+         for Mask in Interfaces.Unsigned_32 range 0 .. Last_Mask loop
+            declare
+               Seen : constant Observation := Parse_Partition (Text, Mask, Allow_Failure => True);
+            begin
+               Check (Seen.Outcome = Core.Parse_Failed, "partition schedule accepted invalid input");
+               Check (Seen.Diagnostic.Code = Code, "partition schedule changed the error code");
+               Check (Seen.Diagnostic.Offset = At_Byte, "partition schedule changed the error offset");
+            end;
+         end loop;
+      end;
+   end Check_Invalid_Literal;
 
    procedure Check_Duplicate
      (Text    : String;
@@ -692,6 +728,55 @@ procedure Flyology_JSON.Parser_Core_Tests is
          Expected_Raw,
          Expected_Decoded);
    end Check_Truncated_Raw_Prefix;
+
+   procedure Check_Literal_Transport is
+      Parser : Core.Parser (1, 0, 0);
+      Result : Core.Next_Result;
+      Empty  : Ada.Streams.Stream_Element_Array (1 .. 0);
+   begin
+      Core.Initialize (Parser);
+      Core.Next (Parser, Empty, False, Result);
+      Check (Result.Outcome = Core.Event_Ready, "literal transport omitted document begin");
+
+      declare
+         Input : constant Ada.Streams.Stream_Element_Array := To_Input ("null", -29);
+      begin
+         Core.Next (Parser, Input, True, Result);
+         Check (Result.Outcome = Core.Event_Ready, "monolithic null did not emit its value");
+         Check (Result.Item.Kind = Core.Null_Value, "monolithic null emitted the wrong event");
+         Check (Result.Consumed = 4, "monolithic null reported the wrong consumed count");
+         Check (Result.Item.Has_Raw_Slice, "monolithic null lost its raw slice");
+         Check
+           (Result.Item.Raw_Slice = (First_Count => 0, Octet_Length => 4),
+            "monolithic null reported the wrong raw slice");
+         Check
+           (Result.Item.Source = (First => 0, Octet_Length => 4),
+            "monolithic null reported the wrong source range");
+      end;
+
+      Core.Next (Parser, Empty, True, Result);
+      Check (Result.Outcome = Core.Event_Ready, "monolithic null omitted document end");
+      Core.Next (Parser, Empty, True, Result);
+      Check (Result.Outcome = Core.Document_Complete, "monolithic null did not complete");
+      Core.Reset (Parser);
+      Core.Next (Parser, Empty, False, Result);
+      declare
+         Input : constant Ada.Streams.Stream_Element_Array := To_Input ("true", 43);
+      begin
+         Core.Next (Parser, Input, False, Result);
+         Check (Result.Outcome = Core.Need_Input, "nonfinal exact literal was published early");
+         Check (Result.Consumed = 4, "nonfinal exact literal changed its consumed count");
+      end;
+      declare
+         Delimiter : constant Ada.Streams.Stream_Element_Array := To_Input (" ", -17);
+      begin
+         Core.Next (Parser, Delimiter, True, Result);
+         Check (Result.Outcome = Core.Event_Ready, "continued exact literal did not emit");
+         Check (Result.Item.Kind = Core.Boolean_Value, "continued true emitted the wrong event");
+         Check (Result.Consumed = 0, "literal emission consumed its lookahead delimiter");
+         Check (not Result.Item.Has_Raw_Slice, "split literal retained a stale raw slice");
+      end;
+   end Check_Literal_Transport;
 
    function Fragment_With_Kind
      (Seen : Observation;
@@ -1380,6 +1465,9 @@ begin
    Check_Valid_Splits ("null");
    Check_Valid_Splits ("true");
    Check_Valid_Splits ("false");
+   Check_Valid_Splits ("[ null , true , false ]", Expected_Arrays => 1);
+   Check_Valid_Splits
+     ("{" & Quote & "x" & Quote & ":false}", Expected_Objects => 1);
    Check_Valid_Splits ("0", 1, "0");
    Check_Valid_Splits ("-12.34e+5", 9, "-12.34e+5");
    Check_Valid_Splits ("-0", 2, "-0");
@@ -1458,6 +1546,8 @@ begin
      (Quote & Reverse_Solidus & "n" & Quote,
       String'(1 => ASCII.LF));
    Check_All_Partitions ("null", "");
+   Check_All_Partitions ("true", "");
+   Check_All_Partitions ("false", "");
    Check_All_Partitions ("-1", "");
    Check_All_Partitions ("[0]", "");
    Check_All_Partitions ("{" & Quote & Quote & ":0}", "");
@@ -1524,10 +1614,32 @@ begin
       Check (Escaped.Fragments (1).Decoded_Length = 3, "Unicode escape UTF-8 length is wrong");
    end;
 
-   Check_Invalid ("truex", Core.Invalid_Literal, 4);
+   Check_Invalid_Literal ("truex", Core.Invalid_Literal, 4);
+   Check_Invalid_Literal ("nxll", Core.Invalid_Literal, 1);
+   Check_Invalid_Literal ("nuxl", Core.Invalid_Literal, 2);
+   Check_Invalid_Literal ("nulx", Core.Invalid_Literal, 3);
+   Check_Invalid_Literal ("nullx", Core.Invalid_Literal, 4);
+   Check_Invalid_Literal ("txue", Core.Invalid_Literal, 1);
+   Check_Invalid_Literal ("trxe", Core.Invalid_Literal, 2);
+   Check_Invalid_Literal ("trux", Core.Invalid_Literal, 3);
+   Check_Invalid_Literal ("fxlse", Core.Invalid_Literal, 1);
+   Check_Invalid_Literal ("faxse", Core.Invalid_Literal, 2);
+   Check_Invalid_Literal ("falxe", Core.Invalid_Literal, 3);
+   Check_Invalid_Literal ("falsx", Core.Invalid_Literal, 4);
+   Check_Invalid_Literal ("n", Core.Truncated_Input, 1);
+   Check_Invalid_Literal ("nu", Core.Truncated_Input, 2);
+   Check_Invalid_Literal ("nul", Core.Truncated_Input, 3);
+   Check_Invalid_Literal ("t", Core.Truncated_Input, 1);
+   Check_Invalid_Literal ("tr", Core.Truncated_Input, 2);
+   Check_Invalid_Literal ("tru", Core.Truncated_Input, 3);
+   Check_Invalid_Literal ("f", Core.Truncated_Input, 1);
+   Check_Invalid_Literal ("fa", Core.Truncated_Input, 2);
+   Check_Invalid_Literal ("fal", Core.Truncated_Input, 3);
+   Check_Invalid_Literal ("fals", Core.Truncated_Input, 4);
    Check_Invalid ("01", Core.Invalid_Number, 1);
    Check_Invalid ("[0,]", Core.Unexpected_Token, 3);
    Check_Invalid ("1.", Core.Truncated_Input, 2);
+   Check_Literal_Transport;
 
    Check_Duplicate
      ("{" & Quote & "a" & Quote & ":0," & Quote & "a" & Quote & ":1}", 7);

@@ -1106,23 +1106,42 @@ package body Flyology_JSON.Parser_Core is
       End_Of_Input : Boolean;
       Consumed     : in out Count;
       Result       : in out Next_Result) is
-      Value : Octet;
+      Token          : constant Token_Kind := Self.Token;
+      Length         : constant Natural := Literal_Length (Token);
+      Local_Consumed : Count := Consumed;
+      Local_Offset   : Byte_Offset := Self.Next_Offset;
+      Position       : Natural := Self.Literal_Position;
+      Value          : Octet;
+
+      procedure Commit_Position is
+      begin
+         Consumed := Local_Consumed;
+         Self.Next_Offset := Local_Offset;
+         Self.Literal_Position := Position;
+      end Commit_Position;
    begin
-      while Self.Literal_Position < Literal_Length (Self.Token) and then Consumed < Input'Length loop
-         Value := Input_Octet (Input, Consumed);
-         if not Consume_One (Self, Consumed, Result) then
+      while Position < Length and then Local_Consumed < Input'Length loop
+         if Local_Offset = Byte_Offset'Last then
+            Commit_Position;
+            Fail (Self, Result, Offset_Exhausted, Local_Offset);
             return;
          end if;
 
-         if Value /= Literal_Octet (Self.Token, Self.Literal_Position + 1) then
-            Fail (Self, Result, Invalid_Literal, Self.Next_Offset - 1);
+         Value := Input_Octet (Input, Local_Consumed);
+         Local_Consumed := Local_Consumed + 1;
+         Local_Offset := Local_Offset + 1;
+
+         if Value /= Literal_Octet (Token, Position + 1) then
+            Commit_Position;
+            Fail (Self, Result, Invalid_Literal, Local_Offset - 1);
             return;
          end if;
 
-         Self.Literal_Position := Self.Literal_Position + 1;
+         Position := Position + 1;
       end loop;
+      Commit_Position;
 
-      if Self.Literal_Position < Literal_Length (Self.Token) then
+      if Position < Length then
          if End_Of_Input then
             Fail (Self, Result, Truncated_Input, Self.Next_Offset);
          else
