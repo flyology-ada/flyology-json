@@ -5,6 +5,8 @@
 **/alire/
 **/config/
 **/bin/
+**/node_modules/
+/benchmarks/competitors/rust/target/
 build/
 docs/api/
 

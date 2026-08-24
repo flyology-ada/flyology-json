@@ -62,6 +62,7 @@ marks its result `directional`; it does not silently publish a `formal` result.
 Every emitted result records the CI trigger/provider/workflow/job/run/attempt,
 runner name and image, result URL, repository commit, executable and adapter
 digests, source and license contract digests, Cargo lock digest when applicable,
+validator, Node/npm package-manifest and tooling-lock digests,
 compiler/linker/target/flags, host controls, seeded run order, and result
 classification. Local results use trigger `local` and empty CI strings, but
 must retain the same build, source, host, and contract provenance.

@@ -1,0 +1,21 @@
+{
+  "name": "flyology-json-benchmark-contract-tools",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": "24.19.0"
+  },
+  "packageManager": "npm@11.17.0",
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "validate:schemas": "node validate-records.mjs --schema-only capability.schema.json && node validate-records.mjs --schema-only result.schema.json && node validate-records.mjs --schema-only skip.schema.json",
+    "validate:capabilities": "node validate-records.mjs capability.schema.json ../competitors",
+    "verify:tooling": "./verify-tooling.sh"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  }
+}

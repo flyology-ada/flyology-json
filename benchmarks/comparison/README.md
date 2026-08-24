@@ -10,10 +10,23 @@ The exact contract is the combination of this document,
 [`result.schema.json`](result.schema.json), [`sources.lock.tsv`](sources.lock.tsv),
 [`licenses.lock.tsv`](licenses.lock.tsv), and
 [`skip.schema.json`](skip.schema.json), and [`ci-protocol.md`](ci-protocol.md),
-together with the parent benchmark sampling policy. A retained result records
+the strict validator sources, exact Node/npm declaration, npm lock, and tooling
+license lock, together with the parent benchmark sampling policy. A retained
+result records
 the SHA-256 of every contract file and the harness commit. Changing a field,
 lane, source, compiler mode, inclusion rule, or measurement rule changes the
 contract identity; old and new results must not be pooled.
+
+Capability, result, and skip records are validated with the exact Node
+24.19.0 runtime and dependencies pinned in `package-lock.json`. Run
+`npm ci --ignore-scripts`, `npm test`, `npm run verify:tooling`, and
+`npm run validate:capabilities` from this directory. The validator rejects
+malformed UTF-8, a BOM, duplicate decoded object names, unpaired surrogates,
+unsupported numeric-schema constraints, dangling capability references, and
+incomplete lane declarations before applying the Draft 2020-12 schema.
+`verify-tooling.sh` and the test sources are verification evidence rather than
+result-contract inputs; the accepted validator code, toolchain declaration,
+package manifest/lock, and tooling-license lock are explicit record digests.
 
 ## Independent lanes
 
