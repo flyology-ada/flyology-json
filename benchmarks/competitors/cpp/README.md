@@ -2,15 +2,17 @@
 
 This directory contains benchmark-only coarse C++ boundaries for pinned
 simdjson and RapidJSON. Nothing here is linked into the production
-`flyology_json` crate. Both adapters expose only one complete-document DOM
-parse-and-traverse call, use the same fixed-width observation record, retain no
-input, perform no I/O, and publish counters only after successful parsing and
-traversal.
+`flyology_json` crate. simdjson exposes one complete-document DOM
+parse-and-traverse call. RapidJSON exposes both a complete-document DOM call
+and a Reader/SAX event call. The boundaries use the same fixed-width
+observation record, retain no input, perform no I/O, and publish counters only
+after successful parsing and observation.
 
 JSON behavior comes from each pinned library API. The shims do not add
 duplicate rejection, BOM rejection, number normalization, retries, fixture
 selection, timing, or result classification. The checked-in capability records
-disclose the resulting behavior and support only the `parse_dom` lane.
+disclose the resulting behavior. Both implementations support `parse_dom`;
+RapidJSON additionally supports `parse_events`.
 
 ## Maintained entry point
 

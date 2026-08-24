@@ -30,7 +30,7 @@
       "observable_result": "Status plus a checksum of read bytes, value count, error code, and byte offset.",
       "limitations": [
         "The fastest complete-document reader constructs and frees an allocating DOM.",
-        "The adapter does not copy or pad input; yyjson allocates its DOM and string storage internally.",
+        "The Ada adapter passes the caller input directly without preparing or copying it, but zero-flag yyjson internally allocates a private input buffer, copies every input octet, and writes four padding octets during each timed operation.",
         "Number conversion and per-operation document cleanup are included in timed work.",
         "Only a complete contiguous input is accepted; chunk schedules are not supported."
       ]
@@ -118,7 +118,7 @@
     "input_access": "read_only",
     "required_readable_padding_octets": 0,
     "required_writable_padding_octets": 0,
-    "copy_policy": "none",
+    "copy_policy": "per_operation",
     "allocation_reporting": "unavailable",
     "peak_memory_reporting": "process_rss"
   }

@@ -24,6 +24,15 @@ read-only and retained only for the duration of the call. DOM allocation,
 string copying, number conversion, recursive observation, and cleanup are part
 of the `parse_dom` timed operation.
 
-The exact behavior used for comparisons—including the accepted initial BOM,
-UTF-8 validation, duplicate preservation, number conversion, and unsupported
-lanes—is in `capability.json`.
+The `parse_events` lane invokes `rapidjson::Reader::Parse` with
+`kParseValidateEncodingFlag | kParseNumbersAsStringsFlag`. Its SAX handler
+observes every structural token, member name, and scalar without constructing a
+DOM. Number callbacks receive the exact lexical span; decoded names and strings
+are callback-scoped. One Reader is reused per calling thread, so the maintained
+preflight grows its internal decoded-token stack before measurement. This lane
+still requires one complete contiguous input and preserves duplicate names
+rather than rejecting them.
+
+The exact behavior used for comparisons—including the DOM lane's accepted BOM,
+the event lane's rejected BOM, UTF-8 validation, duplicate preservation, number
+handling, and unsupported lanes—is in `capability.json`.
