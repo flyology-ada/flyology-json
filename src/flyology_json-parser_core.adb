@@ -1,0 +1,1394 @@
+package body Flyology_JSON.Parser_Core is
+
+   use type Ada.Streams.Stream_Element;
+   use type Ada.Streams.Stream_Element_Count;
+   use type Byte_Offset;
+   use type Parser_Numbers.Transition_Result;
+   use type Parser_UTF8.Blame_Position;
+   use type Parser_UTF8.Feed_Status;
+   use type Interfaces.Unsigned_32;
+
+   subtype Octet is Ada.Streams.Stream_Element;
+   subtype Count is Ada.Streams.Stream_Element_Count;
+
+   Quote       : constant Octet := Character'Pos ('"');
+   Minus       : constant Octet := Character'Pos ('-');
+   Plus        : constant Octet := Character'Pos ('+');
+   Decimal     : constant Octet := Character'Pos ('.');
+   Lower_E     : constant Octet := Character'Pos ('e');
+   Upper_E     : constant Octet := Character'Pos ('E');
+   Zero        : constant Octet := Character'Pos ('0');
+   Nine        : constant Octet := Character'Pos ('9');
+   Left_Brace  : constant Octet := Character'Pos ('{');
+   Right_Brace : constant Octet := Character'Pos ('}');
+   Left_Bracket : constant Octet := Character'Pos ('[');
+   Right_Bracket : constant Octet := Character'Pos (']');
+   Comma       : constant Octet := Character'Pos (',');
+   Colon       : constant Octet := Character'Pos (':');
+   Reverse_Solidus : constant Octet := Character'Pos ('\');
+
+   Empty_Event : constant Event :=
+     (Kind          => Document_Begin,
+      Source        => (First => 0, Octet_Length => 0),
+      Has_Raw_Slice => False,
+      Raw_Slice     => (First_Count => 0, Octet_Length => 0),
+      Decoded_Kind  => No_Decoded_Fragment,
+      Decoded_Source => (First => 0, Octet_Length => 0),
+      Decoded       => (Length => 0, Octets => [others => 0]),
+      Boolean_Data  => False);
+
+   Empty_Diagnostic : constant Diagnostic := (Code => No_Error, Offset => 0);
+
+   function Is_Whitespace (Value : Octet) return Boolean is
+     (Value = Character'Pos (' ')
+      or else Value = Character'Pos (ASCII.HT)
+      or else Value = Character'Pos (ASCII.LF)
+      or else Value = Character'Pos (ASCII.CR));
+
+   function Is_Number_Octet (Value : Octet) return Boolean is
+     (Value in Zero .. Nine
+      or else Value = Minus
+      or else Value = Plus
+      or else Value = Decimal
+      or else Value = Lower_E
+      or else Value = Upper_E);
+
+   function Is_Token_Delimiter (Value : Octet) return Boolean is
+     (Is_Whitespace (Value) or else Value = Comma or else Value = Right_Brace or else Value = Right_Bracket);
+
+   function Input_Octet
+     (Input : Ada.Streams.Stream_Element_Array;
+      Position : Count) return Octet
+   is (Input (Input'First + Ada.Streams.Stream_Element_Offset (Position)));
+
+   procedure Clear_Result (Result : out Next_Result) is
+   begin
+      Result :=
+        (Outcome    => Need_Input,
+         Consumed   => 0,
+         Item       => Empty_Event,
+         Diagnostic => Empty_Diagnostic);
+   end Clear_Result;
+
+   procedure Set_Event
+     (Result        : in out Next_Result;
+      Kind          : Event_Kind;
+      First         : Byte_Offset;
+      Length        : Byte_Offset;
+      Has_Raw_Slice : Boolean := False;
+      Raw_First     : Count := 0;
+      Raw_Length    : Count := 0;
+      Decoded_Kind  : Decoded_Fragment_Kind := No_Decoded_Fragment;
+      Decoded_First : Byte_Offset := 0;
+      Decoded_Length : Byte_Offset := 0;
+      Decoded       : Inline_Scalar := (Length => 0, Octets => [others => 0]);
+      Boolean_Data  : Boolean := False) is
+   begin
+      Result.Outcome := Event_Ready;
+      Result.Item :=
+        (Kind          => Kind,
+         Source        => (First => First, Octet_Length => Length),
+         Has_Raw_Slice => Has_Raw_Slice,
+         Raw_Slice     => (First_Count => Raw_First, Octet_Length => Raw_Length),
+         Decoded_Kind  => Decoded_Kind,
+         Decoded_Source => (First => Decoded_First, Octet_Length => Decoded_Length),
+         Decoded       => Decoded,
+         Boolean_Data  => Boolean_Data);
+      Result.Diagnostic := Empty_Diagnostic;
+   end Set_Event;
+
+   procedure Fail
+     (Self   : in out Parser;
+      Result : in out Next_Result;
+      Code   : Error_Code;
+      Offset : Byte_Offset) is
+   begin
+      Self.Current_State := Failed;
+      Self.Last_Diagnostic := (Code => Code, Offset => Offset);
+      Result.Outcome := Parse_Failed;
+      Result.Item := Empty_Event;
+      Result.Diagnostic := Self.Last_Diagnostic;
+   end Fail;
+
+   function Consume_One
+     (Self     : in out Parser;
+      Consumed : in out Count;
+      Result   : in out Next_Result) return Boolean is
+   begin
+      if Self.Next_Offset = Byte_Offset'Last then
+         Fail (Self, Result, Offset_Exhausted, Self.Next_Offset);
+         return False;
+      end if;
+
+      Consumed := Consumed + 1;
+      Self.Next_Offset := Self.Next_Offset + 1;
+      Result.Consumed := Consumed;
+      return True;
+   end Consume_One;
+
+   function Literal_Length (Token : Token_Kind) return Natural is
+     (case Token is
+         when Null_Token | True_Token => 4,
+         when False_Token             => 5,
+         when others                  => 0);
+
+   function Literal_Octet (Token : Token_Kind; Position : Positive) return Octet is
+      Null_Text  : constant String := "null";
+      True_Text  : constant String := "true";
+      False_Text : constant String := "false";
+   begin
+      return
+        (case Token is
+            when Null_Token  => Character'Pos (Null_Text (Position)),
+            when True_Token  => Character'Pos (True_Text (Position)),
+            when False_Token => Character'Pos (False_Text (Position)),
+            when others      => 0);
+   end Literal_Octet;
+
+   procedure Complete_Value (Self : in out Parser) is
+   begin
+      if Self.Depth = 0 then
+         Self.Root_Complete := True;
+      else
+         case Self.Stack (Self.Depth).Phase is
+            when Array_First_Or_End | Array_Value =>
+               Self.Stack (Self.Depth).Phase := Array_Comma_Or_End;
+            when Object_Value =>
+               Self.Stack (Self.Depth).Phase := Object_Comma_Or_End;
+            when others =>
+               null;
+         end case;
+      end if;
+   end Complete_Value;
+
+   procedure Start_Container_Value (Self : in out Parser) is
+   begin
+      if Self.Depth = 0 then
+         Self.Root_Started := True;
+      else
+         case Self.Stack (Self.Depth).Phase is
+            when Array_First_Or_End | Array_Value =>
+               Self.Stack (Self.Depth).Phase := Array_Comma_Or_End;
+            when Object_Value =>
+               Self.Stack (Self.Depth).Phase := Object_Comma_Or_End;
+            when others =>
+               null;
+         end case;
+      end if;
+   end Start_Container_Value;
+
+   procedure Begin_Scalar_Value (Self : in out Parser) is
+   begin
+      if Self.Depth = 0 then
+         Self.Root_Started := True;
+      end if;
+   end Begin_Scalar_Value;
+
+   function Value_Is_Expected (Self : Parser) return Boolean is
+   begin
+      if Self.Depth = 0 then
+         return not Self.Root_Started;
+      end if;
+
+      return Self.Stack (Self.Depth).Phase in Array_First_Or_End | Array_Value | Object_Value;
+   end Value_Is_Expected;
+
+   procedure Start_Literal
+     (Self        : in out Parser;
+      Token       : Token_Kind;
+      First_Count : Count) is
+   begin
+      Begin_Scalar_Value (Self);
+      Self.Token := Token;
+      Self.Token_Start := Self.Next_Offset;
+      Self.Literal_Position := 0;
+      Self.Literal_Can_Slice := True;
+      Self.Literal_First_Count := First_Count;
+   end Start_Literal;
+
+   procedure Emit_Literal (Self : in out Parser; Result : in out Next_Result) is
+      Token  : constant Token_Kind := Self.Token;
+      Length : constant Natural := Literal_Length (Token);
+   begin
+      Self.Token := No_Token;
+      Complete_Value (Self);
+
+      if Token = Null_Token then
+         Set_Event
+           (Result,
+            Null_Value,
+            Self.Token_Start,
+            Byte_Offset (Length),
+            Self.Literal_Can_Slice,
+            Self.Literal_First_Count,
+            Count (Length));
+      else
+         Set_Event
+           (Result,
+            Boolean_Value,
+            Self.Token_Start,
+            Byte_Offset (Length),
+            Self.Literal_Can_Slice,
+            Self.Literal_First_Count,
+            Count (Length),
+            Boolean_Data => Token = True_Token);
+      end if;
+   end Emit_Literal;
+
+   function Hex_Digit (Value : Octet; Digit : out Interfaces.Unsigned_32) return Boolean is
+   begin
+      if Value in Character'Pos ('0') .. Character'Pos ('9') then
+         Digit := Interfaces.Unsigned_32 (Value - Character'Pos ('0'));
+      elsif Value in Character'Pos ('A') .. Character'Pos ('F') then
+         Digit := Interfaces.Unsigned_32 (Value - Character'Pos ('A') + 10);
+      elsif Value in Character'Pos ('a') .. Character'Pos ('f') then
+         Digit := Interfaces.Unsigned_32 (Value - Character'Pos ('a') + 10);
+      else
+         Digit := 0;
+         return False;
+      end if;
+
+      return True;
+   end Hex_Digit;
+
+   function Encode_UTF8 (Code_Point : Interfaces.Unsigned_32) return Inline_Scalar is
+      Result : Inline_Scalar := (Length => 0, Octets => [others => 0]);
+   begin
+      if Code_Point <= 16#7F# then
+         Result.Length := 1;
+         Result.Octets (1) := Octet (Code_Point);
+      elsif Code_Point <= 16#7FF# then
+         Result.Length := 2;
+         Result.Octets (1) := 16#C0# or Octet (Code_Point / 2**6);
+         Result.Octets (2) := 16#80# or Octet (Code_Point and 16#3F#);
+      elsif Code_Point <= 16#FFFF# then
+         Result.Length := 3;
+         Result.Octets (1) := 16#E0# or Octet (Code_Point / 2**12);
+         Result.Octets (2) := 16#80# or Octet ((Code_Point / 2**6) and 16#3F#);
+         Result.Octets (3) := 16#80# or Octet (Code_Point and 16#3F#);
+      else
+         Result.Length := 4;
+         Result.Octets (1) := 16#F0# or Octet (Code_Point / 2**18);
+         Result.Octets (2) := 16#80# or Octet ((Code_Point / 2**12) and 16#3F#);
+         Result.Octets (3) := 16#80# or Octet ((Code_Point / 2**6) and 16#3F#);
+         Result.Octets (4) := 16#80# or Octet (Code_Point and 16#3F#);
+      end if;
+
+      return Result;
+   end Encode_UTF8;
+
+   function Text_Fragment_Kind (Self : Parser) return Event_Kind is
+     (if Self.Token = Name_Token then Name_Fragment else String_Fragment);
+
+   procedure Emit_Inline_Text
+     (Self   : Parser;
+      Result : in out Next_Result;
+      Raw_First : Byte_Offset;
+      Raw_Length : Byte_Offset;
+      Raw_First_Count : Count;
+      Raw_Count_Length : Count;
+      Decoded_First : Byte_Offset;
+      Decoded_Length : Byte_Offset;
+      Scalar : Inline_Scalar) is
+   begin
+      Set_Event
+        (Result,
+         Text_Fragment_Kind (Self),
+         Raw_First,
+         Raw_Length,
+         Has_Raw_Slice => True,
+         Raw_First     => Raw_First_Count,
+         Raw_Length    => Raw_Count_Length,
+         Decoded_Kind   => Decoded_Inline_Scalar,
+         Decoded_First  => Decoded_First,
+         Decoded_Length => Decoded_Length,
+         Decoded        => Scalar);
+   end Emit_Inline_Text;
+
+   procedure Emit_Raw_Only_Text
+     (Self         : Parser;
+      Result       : in out Next_Result;
+      First        : Byte_Offset;
+      Length       : Byte_Offset;
+      First_Count  : Count;
+      Count_Length : Count) is
+   begin
+      Set_Event
+        (Result,
+         Text_Fragment_Kind (Self),
+         First,
+         Length,
+         Has_Raw_Slice => True,
+         Raw_First     => First_Count,
+         Raw_Length    => Count_Length);
+   end Emit_Raw_Only_Text;
+
+   procedure Emit_Raw_Text
+     (Self        : Parser;
+      Result      : in out Next_Result;
+      First       : Byte_Offset;
+      Length      : Byte_Offset;
+      First_Count : Count;
+      Count_Length : Count) is
+   begin
+      Set_Event
+        (Result,
+         Text_Fragment_Kind (Self),
+         First,
+         Length,
+         Has_Raw_Slice => True,
+         Raw_First     => First_Count,
+         Raw_Length    => Count_Length,
+         Decoded_Kind  => Decoded_Is_Raw_Range,
+         Decoded_First => First,
+         Decoded_Length => Length);
+   end Emit_Raw_Text;
+
+   procedure Start_Text
+     (Self     : in out Parser;
+      Token    : Token_Kind;
+      Result   : in out Next_Result;
+      Consumed : in out Count) is
+      Start : constant Byte_Offset := Self.Next_Offset;
+   begin
+      if Token = String_Token then
+         Begin_Scalar_Value (Self);
+      end if;
+
+      if not Consume_One (Self, Consumed, Result) then
+         return;
+      end if;
+
+      Self.Token := Token;
+      Self.Token_Start := Start;
+      Self.Text_State := Text_Content;
+      Self.Text_Hex_Value := 0;
+      Self.Text_Hex_Digits := 0;
+      Self.Text_High_Surrogate := 0;
+      Parser_UTF8.Reset (Self.UTF8);
+      Set_Event
+        (Result,
+         (if Token = Name_Token then Name_Begin else String_Begin),
+         Start,
+         1,
+         Has_Raw_Slice => True,
+         Raw_First     => Consumed - 1,
+         Raw_Length    => 1);
+   end Start_Text;
+
+   procedure Finish_Text
+     (Self     : in out Parser;
+      Result   : in out Next_Result;
+      Consumed : in out Count) is
+      Start : constant Byte_Offset := Self.Next_Offset;
+      Token : constant Token_Kind := Self.Token;
+   begin
+      if not Consume_One (Self, Consumed, Result) then
+         return;
+      end if;
+
+      Self.Token := No_Token;
+      if Token = Name_Token then
+         Self.Stack (Self.Depth).Phase := Object_Colon;
+      else
+         Complete_Value (Self);
+      end if;
+
+      Set_Event
+        (Result,
+         (if Token = Name_Token then Name_End else String_End),
+         Start,
+         1,
+         Has_Raw_Slice => True,
+         Raw_First     => Consumed - 1,
+         Raw_Length    => 1);
+   end Finish_Text;
+
+   procedure Process_Pending_UTF8
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Consumed     : in out Count;
+      Result       : in out Next_Result) is
+      Value        : Octet;
+      Feed         : Parser_UTF8.Feed_Result;
+      Candidate    : Parser_UTF8.Decoder;
+      First_Count  : constant Count := Consumed;
+      First_Offset : constant Byte_Offset := Self.Next_Offset;
+   begin
+      while Parser_UTF8.Has_Pending_Octets (Self.UTF8) and then Consumed < Input'Length loop
+         Value := Input_Octet (Input, Consumed);
+         Candidate := Self.UTF8;
+         Parser_UTF8.Feed (Candidate, Value, Feed);
+
+         if Feed.Status = Parser_UTF8.Invalid then
+            if Consumed > First_Count then
+               Emit_Raw_Only_Text
+                 (Self,
+                  Result,
+                  First_Offset,
+                  Self.Next_Offset - First_Offset,
+                  First_Count,
+                  Consumed - First_Count);
+            elsif Consume_One (Self, Consumed, Result) then
+               Fail
+                 (Self,
+                  Result,
+                  Invalid_UTF8,
+                  (if Feed.Blame = Parser_UTF8.Stored_Lead_Octet
+                   then Self.UTF8_Lead_Offset
+                   else Self.Next_Offset - 1));
+            end if;
+            return;
+         end if;
+
+         Self.UTF8 := Candidate;
+         if not Consume_One (Self, Consumed, Result) then
+            return;
+         end if;
+
+         if Feed.Status = Parser_UTF8.Scalar_Ready then
+            Emit_Inline_Text
+              (Self,
+               Result,
+               First_Offset,
+               Self.Next_Offset - First_Offset,
+               First_Count,
+               Consumed - First_Count,
+               Self.UTF8_Lead_Offset,
+               Self.Next_Offset - Self.UTF8_Lead_Offset,
+               (Length => Feed.Value.Length, Octets => Feed.Value.Octets));
+            return;
+         end if;
+      end loop;
+
+      if Parser_UTF8.Has_Pending_Octets (Self.UTF8) then
+         if Consumed > First_Count then
+            Emit_Raw_Only_Text
+              (Self,
+               Result,
+               First_Offset,
+               Self.Next_Offset - First_Offset,
+               First_Count,
+               Consumed - First_Count);
+         elsif End_Of_Input then
+            Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+         else
+            Result.Outcome := Need_Input;
+         end if;
+      end if;
+   end Process_Pending_UTF8;
+
+   procedure Process_Text
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Consumed     : in out Count;
+      Result       : in out Next_Result) is
+      Value               : Octet;
+      Feed                : Parser_UTF8.Feed_Result;
+      Candidate_UTF8      : Parser_UTF8.Decoder;
+      Digit               : Interfaces.Unsigned_32;
+      Code_Point          : Interfaces.Unsigned_32;
+      Candidate_Hex       : Interfaces.Unsigned_32;
+      First_Count         : Count;
+      Complete_Count      : Count;
+      First_Offset        : Byte_Offset;
+      Complete_Offset     : Byte_Offset;
+      Scalar_First_Count  : Count;
+      Scalar_First_Offset : Byte_Offset;
+      Piece_First_Count   : constant Count := Consumed;
+      Piece_First_Offset  : constant Byte_Offset := Self.Next_Offset;
+   begin
+      if Self.Text_State = Text_Content and then Parser_UTF8.Has_Pending_Octets (Self.UTF8) then
+         Process_Pending_UTF8 (Self, Input, End_Of_Input, Consumed, Result);
+         return;
+      end if;
+
+      loop
+         if Self.Text_State = Text_Content then
+            First_Count := Consumed;
+            Complete_Count := Consumed;
+            First_Offset := Self.Next_Offset;
+            Complete_Offset := Self.Next_Offset;
+            Scalar_First_Count := Consumed;
+            Scalar_First_Offset := Self.Next_Offset;
+
+            while Consumed < Input'Length loop
+               Value := Input_Octet (Input, Consumed);
+               exit when
+                 not Parser_UTF8.Has_Pending_Octets (Self.UTF8)
+                 and then (Value = Quote or else Value = Reverse_Solidus or else Value < 16#20#);
+
+               if Value <= 16#7F# and then not Parser_UTF8.Has_Pending_Octets (Self.UTF8) then
+                  if not Consume_One (Self, Consumed, Result) then
+                     return;
+                  end if;
+                  Complete_Count := Consumed;
+                  Complete_Offset := Self.Next_Offset;
+               else
+                  if not Parser_UTF8.Has_Pending_Octets (Self.UTF8) then
+                     Self.UTF8_Lead_Offset := Self.Next_Offset;
+                     Scalar_First_Count := Consumed;
+                     Scalar_First_Offset := Self.Next_Offset;
+                  end if;
+
+                  Candidate_UTF8 := Self.UTF8;
+                  Parser_UTF8.Feed (Candidate_UTF8, Value, Feed);
+
+                  if Feed.Status = Parser_UTF8.Invalid then
+                     if Complete_Count > First_Count then
+                        --  Nothing from this call is externally visible yet,
+                        --  so roll the malformed scalar back to its lead and
+                        --  publish the preceding valid bulk span.  Retrying
+                        --  the suffix then exposes the malformed scalar's
+                        --  valid raw prefix before the proving-bad octet.
+                        Consumed := Scalar_First_Count;
+                        Self.Next_Offset := Scalar_First_Offset;
+                        Result.Consumed := Consumed;
+                        Parser_UTF8.Reset (Self.UTF8);
+                        Emit_Raw_Text
+                          (Self,
+                           Result,
+                           First_Offset,
+                           Complete_Offset - First_Offset,
+                           First_Count,
+                           Complete_Count - First_Count);
+                     elsif Consumed > First_Count then
+                        Emit_Raw_Only_Text
+                          (Self,
+                           Result,
+                           First_Offset,
+                           Self.Next_Offset - First_Offset,
+                           First_Count,
+                           Consumed - First_Count);
+                     elsif Consume_One (Self, Consumed, Result) then
+                        Fail
+                          (Self,
+                           Result,
+                           Invalid_UTF8,
+                           (if Feed.Blame = Parser_UTF8.Stored_Lead_Octet
+                            then Self.UTF8_Lead_Offset
+                            else Self.Next_Offset - 1));
+                     end if;
+                     return;
+                  end if;
+
+                  Self.UTF8 := Candidate_UTF8;
+                  if not Consume_One (Self, Consumed, Result) then
+                     return;
+                  end if;
+
+                  if Feed.Status = Parser_UTF8.Scalar_Ready then
+                     Complete_Count := Consumed;
+                     Complete_Offset := Self.Next_Offset;
+                  end if;
+               end if;
+            end loop;
+
+            if Complete_Count > First_Count then
+               if Parser_UTF8.Has_Pending_Octets (Self.UTF8) then
+                  --  The caller cannot recover a raw slice after advancing
+                  --  past this call.  Retry a trailing partial scalar from
+                  --  its lead after publishing the preceding complete span.
+                  Consumed := Scalar_First_Count;
+                  Self.Next_Offset := Scalar_First_Offset;
+                  Result.Consumed := Consumed;
+                  Parser_UTF8.Reset (Self.UTF8);
+               end if;
+               Emit_Raw_Text
+                 (Self,
+                  Result,
+                  First_Offset,
+                  Complete_Offset - First_Offset,
+                  First_Count,
+                  Complete_Count - First_Count);
+               return;
+            end if;
+
+            if Parser_UTF8.Has_Pending_Octets (Self.UTF8) then
+               if Consumed > First_Count then
+                  Emit_Raw_Only_Text
+                    (Self,
+                     Result,
+                     First_Offset,
+                     Self.Next_Offset - First_Offset,
+                     First_Count,
+                     Consumed - First_Count);
+               elsif End_Of_Input then
+                  Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+               else
+                  Result.Outcome := Need_Input;
+               end if;
+               return;
+            elsif Consumed = Input'Length then
+               if End_Of_Input then
+                  Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+               else
+                  Result.Outcome := Need_Input;
+               end if;
+               return;
+            end if;
+
+            Value := Input_Octet (Input, Consumed);
+            if Value = Quote then
+               Finish_Text (Self, Result, Consumed);
+               return;
+            elsif Value < 16#20# then
+               if Consume_One (Self, Consumed, Result) then
+                  Fail (Self, Result, Raw_Control_Character, Self.Next_Offset - 1);
+               end if;
+               return;
+            else
+               Self.Text_Escape_Start := Self.Next_Offset;
+               if not Consume_One (Self, Consumed, Result) then
+                  return;
+               end if;
+               Self.Text_State := Text_After_Escape;
+            end if;
+
+         elsif Self.Text_State = Text_After_Escape then
+            if Consumed = Input'Length then
+               if Consumed > Piece_First_Count then
+                  Emit_Raw_Only_Text
+                    (Self,
+                     Result,
+                     Piece_First_Offset,
+                     Self.Next_Offset - Piece_First_Offset,
+                     Piece_First_Count,
+                     Consumed - Piece_First_Count);
+               elsif End_Of_Input then
+                  Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+               else
+                  Result.Outcome := Need_Input;
+               end if;
+               return;
+            end if;
+
+            Value := Input_Octet (Input, Consumed);
+            case Value is
+               when Character'Pos ('"') | Character'Pos ('\') | Character'Pos ('/') =>
+                  Code_Point := Interfaces.Unsigned_32 (Value);
+               when Character'Pos ('b') =>
+                  Code_Point := 16#08#;
+               when Character'Pos ('f') =>
+                  Code_Point := 16#0C#;
+               when Character'Pos ('n') =>
+                  Code_Point := 16#0A#;
+               when Character'Pos ('r') =>
+                  Code_Point := 16#0D#;
+               when Character'Pos ('t') =>
+                  Code_Point := 16#09#;
+               when Character'Pos ('u') =>
+                  if not Consume_One (Self, Consumed, Result) then
+                     return;
+                  end if;
+                  Self.Text_State := Text_Unicode_Digits;
+                  Self.Text_Hex_Value := 0;
+                  Self.Text_Hex_Digits := 0;
+                  goto Continue_Text;
+               when others =>
+                  if Consumed > Piece_First_Count then
+                     Emit_Raw_Only_Text
+                       (Self,
+                        Result,
+                        Piece_First_Offset,
+                        Self.Next_Offset - Piece_First_Offset,
+                        Piece_First_Count,
+                        Consumed - Piece_First_Count);
+                  elsif Consume_One (Self, Consumed, Result) then
+                     Fail (Self, Result, Invalid_Escape, Self.Next_Offset - 1);
+                  end if;
+                  return;
+            end case;
+
+            if not Consume_One (Self, Consumed, Result) then
+               return;
+            end if;
+            Self.Text_State := Text_Content;
+            Emit_Inline_Text
+              (Self,
+               Result,
+               Piece_First_Offset,
+               Self.Next_Offset - Piece_First_Offset,
+               Piece_First_Count,
+               Consumed - Piece_First_Count,
+               Self.Text_Escape_Start,
+               Self.Next_Offset - Self.Text_Escape_Start,
+               Encode_UTF8 (Code_Point));
+            return;
+
+         elsif Self.Text_State in Text_Unicode_Digits | Text_Low_Digits then
+            while Self.Text_Hex_Digits < 4 and then Consumed < Input'Length loop
+               Value := Input_Octet (Input, Consumed);
+               if not Hex_Digit (Value, Digit) then
+                  if Consumed > Piece_First_Count then
+                     Emit_Raw_Only_Text
+                       (Self,
+                        Result,
+                        Piece_First_Offset,
+                        Self.Next_Offset - Piece_First_Offset,
+                        Piece_First_Count,
+                        Consumed - Piece_First_Count);
+                  elsif Consume_One (Self, Consumed, Result) then
+                     Fail (Self, Result, Invalid_Escape, Self.Next_Offset - 1);
+                  end if;
+                  return;
+               end if;
+
+               Candidate_Hex := Self.Text_Hex_Value * 16 + Digit;
+
+               if Self.Text_Hex_Digits = 3
+                 and then
+                   ((Self.Text_State = Text_Unicode_Digits
+                     and then Candidate_Hex in 16#DC00# .. 16#DFFF#)
+                    or else
+                      (Self.Text_State = Text_Low_Digits
+                       and then Candidate_Hex not in 16#DC00# .. 16#DFFF#))
+               then
+                  if Consumed > Piece_First_Count then
+                     Emit_Raw_Only_Text
+                       (Self,
+                        Result,
+                        Piece_First_Offset,
+                        Self.Next_Offset - Piece_First_Offset,
+                        Piece_First_Count,
+                        Consumed - Piece_First_Count);
+                  elsif Consume_One (Self, Consumed, Result) then
+                     Fail
+                       (Self,
+                        Result,
+                        Invalid_Surrogate,
+                        (if Self.Text_State = Text_Unicode_Digits
+                         then Self.Text_Escape_Start
+                         else Self.Text_High_Start));
+                  end if;
+                  return;
+               end if;
+
+               if not Consume_One (Self, Consumed, Result) then
+                  return;
+               end if;
+               Self.Text_Hex_Value := Candidate_Hex;
+               Self.Text_Hex_Digits := Self.Text_Hex_Digits + 1;
+            end loop;
+
+            if Self.Text_Hex_Digits < 4 then
+               if Consumed > Piece_First_Count then
+                  Emit_Raw_Only_Text
+                    (Self,
+                     Result,
+                     Piece_First_Offset,
+                     Self.Next_Offset - Piece_First_Offset,
+                     Piece_First_Count,
+                     Consumed - Piece_First_Count);
+               elsif End_Of_Input then
+                  Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+               else
+                  Result.Outcome := Need_Input;
+               end if;
+               return;
+            end if;
+
+            Code_Point := Self.Text_Hex_Value;
+            Self.Text_Hex_Value := 0;
+            Self.Text_Hex_Digits := 0;
+
+            if Self.Text_State = Text_Unicode_Digits then
+               if Code_Point in 16#D800# .. 16#DBFF# then
+                  Self.Text_High_Surrogate := Code_Point;
+                  Self.Text_High_Start := Self.Text_Escape_Start;
+                  Self.Text_State := Text_Low_Backslash;
+                  goto Continue_Text;
+               else
+                  Self.Text_State := Text_Content;
+                  Emit_Inline_Text
+                    (Self,
+                     Result,
+                     Piece_First_Offset,
+                     Self.Next_Offset - Piece_First_Offset,
+                     Piece_First_Count,
+                     Consumed - Piece_First_Count,
+                     Self.Text_Escape_Start,
+                     Self.Next_Offset - Self.Text_Escape_Start,
+                     Encode_UTF8 (Code_Point));
+                  return;
+               end if;
+            else
+               Code_Point :=
+                 16#10000#
+                 + (Self.Text_High_Surrogate - 16#D800#) * 16#400#
+                 + (Code_Point - 16#DC00#);
+               Self.Text_State := Text_Content;
+               Emit_Inline_Text
+                 (Self,
+                  Result,
+                  Piece_First_Offset,
+                  Self.Next_Offset - Piece_First_Offset,
+                  Piece_First_Count,
+                  Consumed - Piece_First_Count,
+                  Self.Text_High_Start,
+                  Self.Next_Offset - Self.Text_High_Start,
+                  Encode_UTF8 (Code_Point));
+               return;
+            end if;
+
+         elsif Self.Text_State = Text_Low_Backslash then
+            if Consumed = Input'Length then
+               if Consumed > Piece_First_Count then
+                  Emit_Raw_Only_Text
+                    (Self,
+                     Result,
+                     Piece_First_Offset,
+                     Self.Next_Offset - Piece_First_Offset,
+                     Piece_First_Count,
+                     Consumed - Piece_First_Count);
+               elsif End_Of_Input then
+                  Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+               else
+                  Result.Outcome := Need_Input;
+               end if;
+               return;
+            end if;
+
+            Value := Input_Octet (Input, Consumed);
+            if Value /= Reverse_Solidus then
+               if Consumed > Piece_First_Count then
+                  Emit_Raw_Only_Text
+                    (Self,
+                     Result,
+                     Piece_First_Offset,
+                     Self.Next_Offset - Piece_First_Offset,
+                     Piece_First_Count,
+                     Consumed - Piece_First_Count);
+               elsif Consume_One (Self, Consumed, Result) then
+                  Fail (Self, Result, Invalid_Surrogate, Self.Text_High_Start);
+               end if;
+               return;
+            end if;
+            if not Consume_One (Self, Consumed, Result) then
+               return;
+            end if;
+            Self.Text_State := Text_Low_U;
+
+         else
+            if Consumed = Input'Length then
+               if Consumed > Piece_First_Count then
+                  Emit_Raw_Only_Text
+                    (Self,
+                     Result,
+                     Piece_First_Offset,
+                     Self.Next_Offset - Piece_First_Offset,
+                     Piece_First_Count,
+                     Consumed - Piece_First_Count);
+               elsif End_Of_Input then
+                  Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+               else
+                  Result.Outcome := Need_Input;
+               end if;
+               return;
+            end if;
+
+            Value := Input_Octet (Input, Consumed);
+            if Value /= Character'Pos ('u') then
+               if Consumed > Piece_First_Count then
+                  Emit_Raw_Only_Text
+                    (Self,
+                     Result,
+                     Piece_First_Offset,
+                     Self.Next_Offset - Piece_First_Offset,
+                     Piece_First_Count,
+                     Consumed - Piece_First_Count);
+               elsif Consume_One (Self, Consumed, Result) then
+                  Fail (Self, Result, Invalid_Escape, Self.Next_Offset - 1);
+               end if;
+               return;
+            end if;
+            if not Consume_One (Self, Consumed, Result) then
+               return;
+            end if;
+            Self.Text_Escape_Start := Self.Next_Offset - 2;
+            Self.Text_State := Text_Low_Digits;
+            Self.Text_Hex_Value := 0;
+            Self.Text_Hex_Digits := 0;
+         end if;
+
+         <<Continue_Text>>
+         null;
+      end loop;
+   end Process_Text;
+
+   procedure Process_Literal
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Consumed     : in out Count;
+      Result       : in out Next_Result) is
+      Value : Octet;
+   begin
+      while Self.Literal_Position < Literal_Length (Self.Token) and then Consumed < Input'Length loop
+         Value := Input_Octet (Input, Consumed);
+         if not Consume_One (Self, Consumed, Result) then
+            return;
+         end if;
+
+         if Value /= Literal_Octet (Self.Token, Self.Literal_Position + 1) then
+            Fail (Self, Result, Invalid_Literal, Self.Next_Offset - 1);
+            return;
+         end if;
+
+         Self.Literal_Position := Self.Literal_Position + 1;
+      end loop;
+
+      if Self.Literal_Position < Literal_Length (Self.Token) then
+         if End_Of_Input then
+            Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+         else
+            Self.Literal_Can_Slice := False;
+            Result.Outcome := Need_Input;
+         end if;
+         return;
+      end if;
+
+      if Consumed < Input'Length then
+         Value := Input_Octet (Input, Consumed);
+         if not Is_Token_Delimiter (Value) then
+            if Consume_One (Self, Consumed, Result) then
+               Fail (Self, Result, Invalid_Literal, Self.Next_Offset - 1);
+            end if;
+            return;
+         end if;
+
+         Emit_Literal (Self, Result);
+      elsif End_Of_Input then
+         Emit_Literal (Self, Result);
+      else
+         Self.Literal_Can_Slice := False;
+         Result.Outcome := Need_Input;
+      end if;
+   end Process_Literal;
+
+   procedure Process_Number
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Consumed     : in out Count;
+      Result       : in out Next_Result) is
+      First_Count  : constant Count := Consumed;
+      First_Offset : constant Byte_Offset := Self.Next_Offset;
+      Value        : Octet;
+      Transition   : Parser_Numbers.Transition_Result;
+      Candidate    : Parser_Numbers.Number_State;
+   begin
+      while Consumed < Input'Length loop
+         Value := Input_Octet (Input, Consumed);
+
+         if Is_Number_Octet (Value) then
+            Candidate := Self.Number;
+            Parser_Numbers.Push (Candidate, Value, Transition);
+
+            if Transition = Parser_Numbers.Transition_Invalid then
+               if Consumed > First_Count then
+                  Set_Event
+                    (Result,
+                     Number_Fragment,
+                     First_Offset,
+                     Byte_Offset (Consumed - First_Count),
+                     True,
+                     First_Count,
+                     Consumed - First_Count);
+               elsif Consume_One (Self, Consumed, Result) then
+                  Fail (Self, Result, Invalid_Number, Self.Next_Offset - 1);
+               end if;
+               return;
+            end if;
+
+            Self.Number := Candidate;
+            if not Consume_One (Self, Consumed, Result) then
+               return;
+            end if;
+         elsif Is_Token_Delimiter (Value) then
+            if not Parser_Numbers.Accepting_End (Self.Number) then
+               if Consumed > First_Count then
+                  Set_Event
+                    (Result,
+                     Number_Fragment,
+                     First_Offset,
+                     Byte_Offset (Consumed - First_Count),
+                     True,
+                     First_Count,
+                     Consumed - First_Count);
+               elsif Consume_One (Self, Consumed, Result) then
+                  Fail (Self, Result, Invalid_Number, Self.Next_Offset - 1);
+               end if;
+               return;
+            end if;
+            exit;
+         else
+            if Consumed > First_Count then
+               Set_Event
+                 (Result,
+                  Number_Fragment,
+                  First_Offset,
+                  Byte_Offset (Consumed - First_Count),
+                  True,
+                  First_Count,
+                  Consumed - First_Count);
+            elsif Consume_One (Self, Consumed, Result) then
+               Fail (Self, Result, Invalid_Number, Self.Next_Offset - 1);
+            end if;
+            return;
+         end if;
+      end loop;
+
+      if Consumed > First_Count then
+         Set_Event
+           (Result,
+            Number_Fragment,
+            First_Offset,
+            Byte_Offset (Consumed - First_Count),
+            True,
+            First_Count,
+            Consumed - First_Count);
+         return;
+      end if;
+
+      if Consumed < Input'Length then
+         Self.Token := No_Token;
+         Complete_Value (Self);
+         Set_Event (Result, Number_End, Self.Next_Offset, 0);
+      elsif End_Of_Input then
+         if Parser_Numbers.Accepting_End (Self.Number) then
+            Self.Token := No_Token;
+            Complete_Value (Self);
+            Set_Event (Result, Number_End, Self.Next_Offset, 0);
+         else
+            Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+         end if;
+      else
+         Result.Outcome := Need_Input;
+      end if;
+   end Process_Number;
+
+   procedure Start_Number (Self : in out Parser; Result : in out Next_Result) is
+   begin
+      Begin_Scalar_Value (Self);
+      Self.Token := Number_Token;
+      Self.Token_Start := Self.Next_Offset;
+      Parser_Numbers.Reset (Self.Number);
+      Set_Event (Result, Number_Begin, Self.Next_Offset, 0);
+   end Start_Number;
+
+   procedure Push_Container
+     (Self     : in out Parser;
+      Kind     : Container_Kind;
+      Phase    : Container_Phase;
+      Result   : in out Next_Result;
+      Consumed : in out Count) is
+      Start : constant Byte_Offset := Self.Next_Offset;
+   begin
+      if Self.Depth = Self.Maximum_Depth then
+         Fail (Self, Result, Depth_Exhausted, Start);
+         return;
+      end if;
+
+      Start_Container_Value (Self);
+      if not Consume_One (Self, Consumed, Result) then
+         return;
+      end if;
+
+      Self.Depth := Self.Depth + 1;
+      Self.Stack (Self.Depth) := (Phase => Phase);
+      Set_Event
+        (Result,
+         (if Kind = Array_Container then Array_Begin else Object_Begin),
+         Start,
+         1,
+         True,
+         Consumed - 1,
+         1);
+   end Push_Container;
+
+   procedure Close_Container
+     (Self     : in out Parser;
+      Kind     : Container_Kind;
+      Result   : in out Next_Result;
+      Consumed : in out Count) is
+      Start : constant Byte_Offset := Self.Next_Offset;
+   begin
+      if not Consume_One (Self, Consumed, Result) then
+         return;
+      end if;
+
+      Self.Depth := Self.Depth - 1;
+      if Self.Depth = 0 then
+         Self.Root_Complete := True;
+      end if;
+
+      Set_Event
+        (Result,
+         (if Kind = Array_Container then Array_End else Object_End),
+         Start,
+         1,
+         True,
+         Consumed - 1,
+         1);
+   end Close_Container;
+
+   procedure Initialize (Self : in out Parser) is
+   begin
+      if Self.Current_State = Uninitialized then
+         Self.Current_State := Ready;
+         Self.Last_Diagnostic := Empty_Diagnostic;
+         Self.Next_Offset := 0;
+         Self.Depth := 0;
+         Self.Root_Started := False;
+         Self.Root_Complete := False;
+         Self.Document_End_Sent := False;
+         Self.Token := No_Token;
+         Self.Text_State := Text_Content;
+         Self.Text_Hex_Value := 0;
+         Self.Text_Hex_Digits := 0;
+         Self.Text_High_Surrogate := 0;
+         Self.Literal_Position := 0;
+         Self.Literal_Can_Slice := False;
+         Parser_Numbers.Reset (Self.Number);
+         Parser_UTF8.Reset (Self.UTF8);
+      end if;
+   end Initialize;
+
+   procedure Next
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Result       : out Next_Result) is
+      Consumed : Count := 0;
+      Value    : Octet;
+   begin
+      Clear_Result (Result);
+
+      if Self.Current_State = Ready then
+         Self.Current_State := Active;
+         Set_Event (Result, Document_Begin, Self.Next_Offset, 0);
+         return;
+      elsif Self.Current_State /= Active then
+         Result.Outcome := Call_Rejected;
+         Result.Diagnostic := (Code => Invalid_State, Offset => Self.Next_Offset);
+         return;
+      end if;
+
+      if Self.Token = Number_Token then
+         Process_Number (Self, Input, End_Of_Input, Consumed, Result);
+         Result.Consumed := Consumed;
+         return;
+      elsif Self.Token in Null_Token | True_Token | False_Token then
+         Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
+         Result.Consumed := Consumed;
+         return;
+      elsif Self.Token in Name_Token | String_Token then
+         Process_Text (Self, Input, End_Of_Input, Consumed, Result);
+         Result.Consumed := Consumed;
+         return;
+      end if;
+
+      if Self.Root_Complete and then not Self.Document_End_Sent then
+         Self.Document_End_Sent := True;
+         Set_Event (Result, Document_End, Self.Next_Offset, 0);
+         return;
+      end if;
+
+      loop
+         while Consumed < Input'Length and then Is_Whitespace (Input_Octet (Input, Consumed)) loop
+            exit when not Consume_One (Self, Consumed, Result);
+         end loop;
+
+         if Self.Current_State = Failed then
+            return;
+         end if;
+
+         if Consumed = Input'Length then
+            if End_Of_Input then
+               if Self.Document_End_Sent then
+                  Self.Current_State := Completed;
+                  Result.Outcome := Document_Complete;
+               else
+                  Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+               end if;
+            else
+               Result.Outcome := Need_Input;
+            end if;
+            Result.Consumed := Consumed;
+            return;
+         end if;
+
+         Value := Input_Octet (Input, Consumed);
+
+         if Self.Document_End_Sent then
+            if Consume_One (Self, Consumed, Result) then
+               Fail (Self, Result, Trailing_Input, Self.Next_Offset - 1);
+            end if;
+            return;
+         end if;
+
+         if Self.Depth > 0 then
+            case Self.Stack (Self.Depth).Phase is
+               when Array_Comma_Or_End =>
+                  if Value = Comma then
+                     if not Consume_One (Self, Consumed, Result) then
+                        return;
+                     end if;
+                     Self.Stack (Self.Depth).Phase := Array_Value;
+                     goto Continue_Parsing;
+                  elsif Value = Right_Bracket then
+                     Close_Container (Self, Array_Container, Result, Consumed);
+                     return;
+                  else
+                     if Consume_One (Self, Consumed, Result) then
+                        Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                     end if;
+                     return;
+                  end if;
+
+               when Object_Comma_Or_End =>
+                  if Value = Comma then
+                     if not Consume_One (Self, Consumed, Result) then
+                        return;
+                     end if;
+                     Self.Stack (Self.Depth).Phase := Object_Name;
+                     goto Continue_Parsing;
+                  elsif Value = Right_Brace then
+                     Close_Container (Self, Object_Container, Result, Consumed);
+                     return;
+                  else
+                     if Consume_One (Self, Consumed, Result) then
+                        Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                     end if;
+                     return;
+                  end if;
+
+               when Object_First_Or_End =>
+                  if Value = Right_Brace then
+                     Close_Container (Self, Object_Container, Result, Consumed);
+                     return;
+                  elsif Value = Quote then
+                     Start_Text (Self, Name_Token, Result, Consumed);
+                     return;
+                  else
+                     if Consume_One (Self, Consumed, Result) then
+                        Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                     end if;
+                     return;
+                  end if;
+
+               when Object_Name =>
+                  if Value = Quote then
+                     Start_Text (Self, Name_Token, Result, Consumed);
+                  else
+                     if Consume_One (Self, Consumed, Result) then
+                        Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                     end if;
+                  end if;
+                  return;
+
+               when Object_Colon | Object_Value =>
+                  if Self.Stack (Self.Depth).Phase = Object_Colon then
+                     if Value = Colon then
+                        if not Consume_One (Self, Consumed, Result) then
+                           return;
+                        end if;
+                        Self.Stack (Self.Depth).Phase := Object_Value;
+                        goto Continue_Parsing;
+                     else
+                        if Consume_One (Self, Consumed, Result) then
+                           Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                        end if;
+                        return;
+                     end if;
+                  end if;
+
+               when Array_First_Or_End =>
+                  if Value = Right_Bracket then
+                     Close_Container (Self, Array_Container, Result, Consumed);
+                     return;
+                  end if;
+
+               when Array_Value =>
+                  if Value = Right_Bracket then
+                     if Consume_One (Self, Consumed, Result) then
+                        Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                     end if;
+                     return;
+                  end if;
+            end case;
+         end if;
+
+         if not Value_Is_Expected (Self) then
+            if Consume_One (Self, Consumed, Result) then
+               Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+            end if;
+            return;
+         end if;
+
+         if Value = Left_Bracket then
+            Push_Container (Self, Array_Container, Array_First_Or_End, Result, Consumed);
+            return;
+         elsif Value = Left_Brace then
+            Push_Container (Self, Object_Container, Object_First_Or_End, Result, Consumed);
+            return;
+         elsif Value = Quote then
+            Start_Text (Self, String_Token, Result, Consumed);
+            return;
+         elsif Value = Character'Pos ('n') then
+            Start_Literal (Self, Null_Token, Consumed);
+            Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
+            Result.Consumed := Consumed;
+            return;
+         elsif Value = Character'Pos ('t') then
+            Start_Literal (Self, True_Token, Consumed);
+            Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
+            Result.Consumed := Consumed;
+            return;
+         elsif Value = Character'Pos ('f') then
+            Start_Literal (Self, False_Token, Consumed);
+            Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
+            Result.Consumed := Consumed;
+            return;
+         elsif Value = Minus or else Value in Zero .. Nine then
+            Start_Number (Self, Result);
+            Result.Consumed := Consumed;
+            return;
+         else
+            if Consume_One (Self, Consumed, Result) then
+               Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+            end if;
+            return;
+         end if;
+
+         <<Continue_Parsing>>
+         null;
+      end loop;
+   end Next;
+
+   procedure Abort_Document (Self : in out Parser) is
+   begin
+      case Self.Current_State is
+         when Uninitialized | Aborted =>
+            null;
+         when others =>
+            Self.Current_State := Aborted;
+      end case;
+   end Abort_Document;
+
+   procedure Reset (Self : in out Parser) is
+   begin
+      if Self.Current_State in Completed | Failed | Aborted then
+         Self.Current_State := Uninitialized;
+         Initialize (Self);
+      end if;
+   end Reset;
+
+   function State (Self : Parser) return Parser_State is (Self.Current_State);
+
+   function Terminal_Diagnostic (Self : Parser) return Diagnostic is (Self.Last_Diagnostic);
+
+end Flyology_JSON.Parser_Core;

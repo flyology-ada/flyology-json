@@ -12,5 +12,9 @@ tags = ["ada", "json", "streaming", "parser", "writer"]
 [[depends-on]]
 gnat = ">=13 & <17"
 
+[[actions]]
+type = "test"
+command = ["./scripts/test-parser.sh"]
+
 [build-switches]
 "*" = { Compile_Checks = "warnings" }

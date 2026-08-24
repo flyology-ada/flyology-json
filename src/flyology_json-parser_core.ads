@@ -1,0 +1,178 @@
+with Ada.Streams;
+with Flyology_JSON.Parser_Numbers;
+with Flyology_JSON.Parser_UTF8;
+with Interfaces;
+
+--  Bounded, allocation-free incremental parser mechanism.
+--
+--  This is a private implementation boundary.  It deliberately contains no
+--  resource-accounting hooks or compatibility policy.
+private package Flyology_JSON.Parser_Core is
+
+   subtype Byte_Offset is Interfaces.Unsigned_64;
+
+   type Parser_State is (Uninitialized, Ready, Active, Completed, Failed, Aborted);
+
+   type Event_Kind is
+     (Document_Begin,
+      Document_End,
+      Object_Begin,
+      Object_End,
+      Array_Begin,
+      Array_End,
+      Name_Begin,
+      Name_Fragment,
+      Name_End,
+      String_Begin,
+      String_Fragment,
+      String_End,
+      Number_Begin,
+      Number_Fragment,
+      Number_End,
+      Null_Value,
+      Boolean_Value);
+
+   type Chunk_Range is record
+      First_Count  : Ada.Streams.Stream_Element_Count;
+      Octet_Length : Ada.Streams.Stream_Element_Count;
+   end record;
+
+   type Source_Range is record
+      First        : Byte_Offset;
+      Octet_Length : Byte_Offset;
+   end record;
+
+   type Decoded_Fragment_Kind is
+     (No_Decoded_Fragment, Decoded_Is_Raw_Range, Decoded_Inline_Scalar);
+
+   type Inline_Scalar is record
+      Length : Natural range 0 .. Parser_UTF8.Scalar_Octets'Length;
+      Octets : Parser_UTF8.Scalar_Octets;
+   end record;
+
+   type Event is record
+      Kind          : Event_Kind;
+      Source         : Source_Range;
+      Has_Raw_Slice : Boolean;
+      --  Raw_Slice is meaningful only for the exact Input array passed to the
+      --  Next call that returned this event.  The parser retains no Input.
+      Raw_Slice     : Chunk_Range;
+      Decoded_Kind  : Decoded_Fragment_Kind;
+      Decoded_Source : Source_Range;
+      Decoded       : Inline_Scalar;
+      Boolean_Data  : Boolean;
+   end record;
+
+   type Error_Code is
+     (No_Error,
+      Invalid_State,
+      Unexpected_Token,
+      Trailing_Input,
+      Truncated_Input,
+      Invalid_Literal,
+      Invalid_Number,
+      Invalid_UTF8,
+      Invalid_Escape,
+      Invalid_Surrogate,
+      Raw_Control_Character,
+      Depth_Exhausted,
+      Offset_Exhausted);
+
+   type Diagnostic is record
+      Code   : Error_Code;
+      Offset : Byte_Offset;
+   end record;
+
+   type Next_Outcome is (Event_Ready, Need_Input, Document_Complete, Parse_Failed, Call_Rejected);
+
+   type Next_Result is record
+      Outcome    : Next_Outcome;
+      Consumed   : Ada.Streams.Stream_Element_Count;
+      Item       : Event;
+      Diagnostic : Parser_Core.Diagnostic;
+   end record;
+
+   type Parser (Maximum_Depth : Natural) is limited private;
+
+   --  Initialize changes an Uninitialized parser to Ready.  In another state
+   --  it is a nonraising no-op.
+   procedure Initialize (Self : in out Parser);
+
+   --  Return exactly one event, Need_Input, completion, or failure.  Consumed
+   --  is always a count from Input'First and never an Ada array index.  Item is
+   --  meaningful only for Event_Ready.  A raw slice is borrowed from this
+   --  exact call.  Inline decoded scalar data is stored in the returned event.
+   procedure Next
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Result       : out Next_Result);
+
+   procedure Abort_Document (Self : in out Parser);
+
+   --  Reset creates a fresh Ready operation from Completed, Failed, or
+   --  Aborted.  In another state it is a nonraising no-op.
+   procedure Reset (Self : in out Parser);
+
+   function State (Self : Parser) return Parser_State;
+
+   function Terminal_Diagnostic (Self : Parser) return Diagnostic
+   with Pre => State (Self) in Failed | Aborted;
+
+private
+
+   type Container_Kind is (Array_Container, Object_Container);
+
+   type Container_Phase is
+     (Array_First_Or_End,
+      Array_Value,
+      Array_Comma_Or_End,
+      Object_First_Or_End,
+      Object_Name,
+      Object_Colon,
+      Object_Value,
+      Object_Comma_Or_End);
+
+   type Container_Frame is record
+      Phase : Container_Phase;
+   end record;
+
+   type Frame_Array is array (Positive range <>) of Container_Frame;
+
+   type Token_Kind is
+     (No_Token, Number_Token, Null_Token, True_Token, False_Token, Name_Token, String_Token);
+
+   type Text_Scan_State is
+     (Text_Content,
+      Text_After_Escape,
+      Text_Unicode_Digits,
+      Text_Low_Backslash,
+      Text_Low_U,
+      Text_Low_Digits);
+
+   type Parser (Maximum_Depth : Natural) is limited record
+      Current_State       : Parser_State := Uninitialized;
+      Last_Diagnostic     : Diagnostic := (Code => No_Error, Offset => 0);
+      Next_Offset         : Byte_Offset := 0;
+      Depth               : Natural := 0;
+      Stack               : Frame_Array (1 .. Maximum_Depth);
+      Root_Started        : Boolean := False;
+      Root_Complete       : Boolean := False;
+      Document_End_Sent   : Boolean := False;
+      Token               : Token_Kind := No_Token;
+      Token_Start         : Byte_Offset := 0;
+      Number              : Parser_Numbers.Number_State;
+      UTF8                 : Parser_UTF8.Decoder;
+      UTF8_Lead_Offset     : Byte_Offset := 0;
+      Text_State           : Text_Scan_State := Text_Content;
+      Text_Escape_Start    : Byte_Offset := 0;
+      Text_High_Start      : Byte_Offset := 0;
+      Text_Hex_Value       : Interfaces.Unsigned_32 := 0;
+      Text_Hex_Digits      : Natural range 0 .. 4 := 0;
+      Text_High_Surrogate  : Interfaces.Unsigned_32 := 0;
+      Literal_Position    : Natural := 0;
+      Literal_Can_Slice   : Boolean := False;
+      Literal_First_Count : Ada.Streams.Stream_Element_Count := 0;
+   end record;
+
+end Flyology_JSON.Parser_Core;
