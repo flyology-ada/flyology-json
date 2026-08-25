@@ -22,6 +22,14 @@ is
    function Accepting_End (State : Number_State) return Boolean;
    --  Whether the octets pushed since Reset form a complete strict JSON number.
 
+   function Scanning_Integer_Digits (State : Number_State) return Boolean;
+   --  Whether additional decimal digits leave the current state unchanged.
+
+   pragma Inline_Always (Reset);
+   pragma Inline_Always (Push);
+   pragma Inline_Always (Accepting_End);
+   pragma Inline_Always (Scanning_Integer_Digits);
+
 private
 
    type Machine_State is

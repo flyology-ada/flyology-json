@@ -22,6 +22,9 @@ package body Flyology_JSON.Parser_Numbers is
    function Accepting_End (State : Number_State) return Boolean
    is (State.Current in At_Zero | In_Integer | In_Fraction | In_Exponent);
 
+   function Scanning_Integer_Digits (State : Number_State) return Boolean
+   is (State.Current = In_Integer);
+
    procedure Reset (State : out Number_State) is
    begin
       State.Current := At_Start;

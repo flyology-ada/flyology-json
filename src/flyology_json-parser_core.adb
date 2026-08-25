@@ -8,131 +8,137 @@ package body Flyology_JSON.Parser_Core is
    use type Parser_Duplicates.Operation_Status;
    use type Parser_UTF8.Blame_Position;
    use type Parser_UTF8.Feed_Status;
+   use type Interfaces.Unsigned_16;
    use type Interfaces.Unsigned_32;
 
    subtype Octet is Ada.Streams.Stream_Element;
    subtype Count is Ada.Streams.Stream_Element_Count;
 
-   Quote       : constant Octet := Character'Pos ('"');
-   Minus       : constant Octet := Character'Pos ('-');
-   Plus        : constant Octet := Character'Pos ('+');
-   Decimal     : constant Octet := Character'Pos ('.');
-   Lower_E     : constant Octet := Character'Pos ('e');
-   Upper_E     : constant Octet := Character'Pos ('E');
-   Zero        : constant Octet := Character'Pos ('0');
-   Nine        : constant Octet := Character'Pos ('9');
-   Left_Brace  : constant Octet := Character'Pos ('{');
-   Right_Brace : constant Octet := Character'Pos ('}');
-   Left_Bracket : constant Octet := Character'Pos ('[');
-   Right_Bracket : constant Octet := Character'Pos (']');
-   Comma       : constant Octet := Character'Pos (',');
-   Colon       : constant Octet := Character'Pos (':');
+   Quote           : constant Octet := Character'Pos ('"');
+   Minus           : constant Octet := Character'Pos ('-');
+   Plus            : constant Octet := Character'Pos ('+');
+   Decimal         : constant Octet := Character'Pos ('.');
+   Lower_E         : constant Octet := Character'Pos ('e');
+   Upper_E         : constant Octet := Character'Pos ('E');
+   Zero            : constant Octet := Character'Pos ('0');
+   Nine            : constant Octet := Character'Pos ('9');
+   Left_Brace      : constant Octet := Character'Pos ('{');
+   Right_Brace     : constant Octet := Character'Pos ('}');
+   Left_Bracket    : constant Octet := Character'Pos ('[');
+   Right_Bracket   : constant Octet := Character'Pos (']');
+   Comma           : constant Octet := Character'Pos (',');
+   Colon           : constant Octet := Character'Pos (':');
    Reverse_Solidus : constant Octet := Character'Pos ('\');
-
-   Empty_Event : constant Event :=
-     (Kind          => Document_Begin,
-      Source        => (First => 0, Octet_Length => 0),
-      Has_Raw_Slice => False,
-      Raw_Slice     => (First_Count => 0, Octet_Length => 0),
-      Decoded_Kind  => No_Decoded_Fragment,
-      Decoded_Source => (First => 0, Octet_Length => 0),
-      Decoded       => (Length => 0, Octets => [others => 0]),
-      Boolean_Data  => False);
 
    Empty_Diagnostic : constant Diagnostic := (Code => No_Error, Offset => 0);
 
-   function Is_Whitespace (Value : Octet) return Boolean is
-     (Value = Character'Pos (' ')
-      or else Value = Character'Pos (ASCII.HT)
-      or else Value = Character'Pos (ASCII.LF)
-      or else Value = Character'Pos (ASCII.CR));
+   Empty_Buffered_Event : constant Buffered_Event :=
+     (Kind          => Document_Begin,
+      Metadata      => 0,
+      Scalar_Octets => [others => 0],
+      Source        => (First => 0, Octet_Length => 0));
 
-   function Is_Number_Octet (Value : Octet) return Boolean is
-     (Value in Zero .. Nine
-      or else Value = Minus
-      or else Value = Plus
-      or else Value = Decimal
-      or else Value = Lower_E
-      or else Value = Upper_E);
+   Has_Raw_Bit           : constant Interfaces.Unsigned_16 := 2#0000_0000_0000_0001#;
+   Decoded_Kind_Factor   : constant Interfaces.Unsigned_16 := 2#0000_0000_0000_0010#;
+   Boolean_Bit           : constant Interfaces.Unsigned_16 := 2#0000_0000_0000_1000#;
+   Scalar_Length_Factor  : constant Interfaces.Unsigned_16 := 2#0000_0000_0001_0000#;
+   Decoded_Length_Factor : constant Interfaces.Unsigned_16 := 2#0000_0000_1000_0000#;
 
-   function Is_Token_Delimiter (Value : Octet) return Boolean is
-     (Is_Whitespace (Value) or else Value = Comma or else Value = Right_Brace or else Value = Right_Bracket);
+   type Engine_Result is record
+      Outcome    : Next_Outcome;
+      Consumed   : Count;
+      Item       : Buffered_Event;
+      Diagnostic : Parser_Core.Diagnostic;
+   end record;
 
-   function Input_Octet
-     (Input : Ada.Streams.Stream_Element_Array;
-      Position : Count) return Octet
+   function Is_Whitespace (Value : Octet) return Boolean
+   is (Value = Character'Pos (' ')
+       or else Value = Character'Pos (ASCII.HT)
+       or else Value = Character'Pos (ASCII.LF)
+       or else Value = Character'Pos (ASCII.CR));
+
+   function Is_Number_Octet (Value : Octet) return Boolean
+   is (Value in Zero .. Nine
+       or else Value = Minus
+       or else Value = Plus
+       or else Value = Decimal
+       or else Value = Lower_E
+       or else Value = Upper_E);
+
+   function Is_Token_Delimiter (Value : Octet) return Boolean
+   is (Is_Whitespace (Value) or else Value = Comma or else Value = Right_Brace or else Value = Right_Bracket);
+
+   function Input_Octet (Input : Ada.Streams.Stream_Element_Array; Position : Count) return Octet
    is (Input (Input'First + Ada.Streams.Stream_Element_Offset (Position)));
 
-   procedure Clear_Result (Result : out Next_Result) is
+   procedure Clear_Result (Result : out Engine_Result) is
    begin
       Result :=
-        (Outcome    => Need_Input,
-         Consumed   => 0,
-         Item       => Empty_Event,
-         Diagnostic => Empty_Diagnostic);
+        (Outcome => Need_Input, Consumed => 0, Item => Empty_Buffered_Event, Diagnostic => Empty_Diagnostic);
    end Clear_Result;
 
    procedure Set_Event
-     (Result        : in out Next_Result;
-      Kind          : Event_Kind;
-      First         : Byte_Offset;
-      Length        : Byte_Offset;
-      Has_Raw_Slice : Boolean := False;
-      Raw_First     : Count := 0;
-      Raw_Length    : Count := 0;
-      Decoded_Kind  : Decoded_Fragment_Kind := No_Decoded_Fragment;
-      Decoded_First : Byte_Offset := 0;
+     (Result         : in out Engine_Result;
+      Kind           : Event_Kind;
+      First          : Byte_Offset;
+      Length         : Byte_Offset;
+      Has_Raw_Slice  : Boolean := False;
+      Raw_First      : Count := 0;
+      Raw_Length     : Count := 0;
+      Decoded_Kind   : Decoded_Fragment_Kind := No_Decoded_Fragment;
+      Decoded_First  : Byte_Offset := 0;
       Decoded_Length : Byte_Offset := 0;
-      Decoded       : Inline_Scalar := (Length => 0, Octets => [others => 0]);
-      Boolean_Data  : Boolean := False) is
+      Decoded        : Inline_Scalar := (Length => 0, Octets => [others => 0]);
+      Boolean_Data   : Boolean := False)
+   is
+      Metadata : Interfaces.Unsigned_16 :=
+        (if Has_Raw_Slice then Has_Raw_Bit else 0)
+        + Interfaces.Unsigned_16 (Decoded_Fragment_Kind'Pos (Decoded_Kind)) * Decoded_Kind_Factor
+        + (if Kind = Boolean_Value and then Boolean_Data then Boolean_Bit else 0);
    begin
       Result.Outcome := Event_Ready;
-      Result.Item :=
-        (Kind          => Kind,
-         Source        => (First => First, Octet_Length => Length),
-         Has_Raw_Slice => Has_Raw_Slice,
-         Raw_Slice     => (First_Count => Raw_First, Octet_Length => Raw_Length),
-         Decoded_Kind  => Decoded_Kind,
-         Decoded_Source => (First => Decoded_First, Octet_Length => Decoded_Length),
-         Decoded       => Decoded,
-         Boolean_Data  => Boolean_Data);
+      pragma Unreferenced (Raw_First, Raw_Length, Decoded_First);
+      if Decoded_Kind = Decoded_Inline_Scalar then
+         Metadata :=
+           Metadata
+           + Interfaces.Unsigned_16 (Decoded.Length) * Scalar_Length_Factor
+           + Interfaces.Unsigned_16 (Decoded_Length) * Decoded_Length_Factor;
+      end if;
+      Result.Item.Kind := Kind;
+      Result.Item.Metadata := Metadata;
+      Result.Item.Source := (First => First, Octet_Length => Length);
+      if Decoded_Kind = Decoded_Inline_Scalar then
+         Result.Item.Scalar_Octets := Decoded.Octets;
+      end if;
       Result.Diagnostic := Empty_Diagnostic;
    end Set_Event;
 
    procedure Fail
-     (Self   : in out Parser;
-      Result : in out Next_Result;
-      Code   : Error_Code;
-      Offset : Byte_Offset) is
+     (Self : in out Parser; Result : in out Engine_Result; Code : Error_Code; Offset : Byte_Offset) is
    begin
       Self.Current_State := Failed;
       Self.Last_Diagnostic := (Code => Code, Offset => Offset);
       Result.Outcome := Parse_Failed;
-      Result.Item := Empty_Event;
+      Result.Item := Empty_Buffered_Event;
       Result.Diagnostic := Self.Last_Diagnostic;
    end Fail;
 
    procedure Retain_Name_Octets
-     (Self   : in out Parser;
-      Octets : Ada.Streams.Stream_Element_Array;
-      Code   : out Error_Code) is
+     (Self : in out Parser; Octets : Ada.Streams.Stream_Element_Array; Code : out Error_Code)
+   is
       Status : Parser_Duplicates.Operation_Status;
    begin
       Parser_Duplicates.Append_Octets (Self.Duplicate_Names, Octets, Status);
       Code :=
         (case Status is
-            when Parser_Duplicates.Operation_Succeeded       => No_Error,
-            when Parser_Duplicates.Name_Storage_Exhausted    => Name_Storage_Exhausted,
-            when Parser_Duplicates.Index_Storage_Exhausted   => Duplicate_Index_Exhausted,
-            when Parser_Duplicates.Invalid_Operation_Order   => Invalid_State);
+           when Parser_Duplicates.Operation_Succeeded     => No_Error,
+           when Parser_Duplicates.Name_Storage_Exhausted  => Name_Storage_Exhausted,
+           when Parser_Duplicates.Index_Storage_Exhausted => Duplicate_Index_Exhausted,
+           when Parser_Duplicates.Invalid_Operation_Order => Invalid_State);
    end Retain_Name_Octets;
 
-   procedure Retain_Name_Scalar
-     (Self   : in out Parser;
-      Scalar : Inline_Scalar;
-      Code   : out Error_Code) is
-      Octets : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset (Scalar.Length));
+   procedure Retain_Name_Scalar (Self : in out Parser; Scalar : Inline_Scalar; Code : out Error_Code) is
+      Octets : Ada.Streams.Stream_Element_Array (1 .. Ada.Streams.Stream_Element_Offset (Scalar.Length));
    begin
       for Position in 1 .. Scalar.Length loop
          Octets (Ada.Streams.Stream_Element_Offset (Position)) := Scalar.Octets (Position);
@@ -140,19 +146,14 @@ package body Flyology_JSON.Parser_Core is
       Retain_Name_Octets (Self, Octets, Code);
    end Retain_Name_Scalar;
 
-   procedure Defer_Failure
-     (Self   : in out Parser;
-      Code   : Error_Code;
-      Offset : Byte_Offset) is
+   procedure Defer_Failure (Self : in out Parser; Code : Error_Code; Offset : Byte_Offset) is
    begin
       Self.Current_State := Failure_Pending;
       Self.Last_Diagnostic := (Code => Code, Offset => Offset);
    end Defer_Failure;
 
    function Consume_One
-     (Self     : in out Parser;
-      Consumed : in out Count;
-      Result   : in out Next_Result) return Boolean is
+     (Self : in out Parser; Consumed : in out Count; Result : in out Engine_Result) return Boolean is
    begin
       if Self.Next_Offset = Byte_Offset'Last then
          Fail (Self, Result, Offset_Exhausted, Self.Next_Offset);
@@ -165,8 +166,8 @@ package body Flyology_JSON.Parser_Core is
       return True;
    end Consume_One;
 
-   function Literal_Length (Token : Token_Kind) return Natural is
-     (case Token is
+   function Literal_Length (Token : Token_Kind) return Natural
+   is (case Token is
          when Null_Token | True_Token => 4,
          when False_Token             => 5,
          when others                  => 0);
@@ -178,10 +179,10 @@ package body Flyology_JSON.Parser_Core is
    begin
       return
         (case Token is
-            when Null_Token  => Character'Pos (Null_Text (Position)),
-            when True_Token  => Character'Pos (True_Text (Position)),
-            when False_Token => Character'Pos (False_Text (Position)),
-            when others      => 0);
+           when Null_Token  => Character'Pos (Null_Text (Position)),
+           when True_Token  => Character'Pos (True_Text (Position)),
+           when False_Token => Character'Pos (False_Text (Position)),
+           when others      => 0);
    end Literal_Octet;
 
    procedure Complete_Value (Self : in out Parser) is
@@ -192,9 +193,11 @@ package body Flyology_JSON.Parser_Core is
          case Self.Stack (Self.Depth).Phase is
             when Array_First_Or_End | Array_Value =>
                Self.Stack (Self.Depth).Phase := Array_Comma_Or_End;
-            when Object_Value =>
+
+            when Object_Value                     =>
                Self.Stack (Self.Depth).Phase := Object_Comma_Or_End;
-            when others =>
+
+            when others                           =>
                null;
          end case;
       end if;
@@ -208,9 +211,11 @@ package body Flyology_JSON.Parser_Core is
          case Self.Stack (Self.Depth).Phase is
             when Array_First_Or_End | Array_Value =>
                Self.Stack (Self.Depth).Phase := Array_Comma_Or_End;
-            when Object_Value =>
+
+            when Object_Value                     =>
                Self.Stack (Self.Depth).Phase := Object_Comma_Or_End;
-            when others =>
+
+            when others                           =>
                null;
          end case;
       end if;
@@ -232,10 +237,7 @@ package body Flyology_JSON.Parser_Core is
       return Self.Stack (Self.Depth).Phase in Array_First_Or_End | Array_Value | Object_Value;
    end Value_Is_Expected;
 
-   procedure Start_Literal
-     (Self        : in out Parser;
-      Token       : Token_Kind;
-      First_Count : Count) is
+   procedure Start_Literal (Self : in out Parser; Token : Token_Kind; First_Count : Count) is
    begin
       Begin_Scalar_Value (Self);
       Self.Token := Token;
@@ -245,7 +247,7 @@ package body Flyology_JSON.Parser_Core is
       Self.Literal_First_Count := First_Count;
    end Start_Literal;
 
-   procedure Emit_Literal (Self : in out Parser; Result : in out Next_Result) is
+   procedure Emit_Literal (Self : in out Parser; Result : in out Engine_Result) is
       Token  : constant Token_Kind := Self.Token;
       Length : constant Natural := Literal_Length (Token);
    begin
@@ -273,6 +275,8 @@ package body Flyology_JSON.Parser_Core is
             Boolean_Data => Token = True_Token);
       end if;
    end Emit_Literal;
+
+   pragma Inline_Always (Emit_Literal);
 
    function Hex_Digit (Value : Octet; Digit : out Interfaces.Unsigned_32) return Boolean is
    begin
@@ -316,28 +320,28 @@ package body Flyology_JSON.Parser_Core is
       return Result;
    end Encode_UTF8;
 
-   function Text_Fragment_Kind (Self : Parser) return Event_Kind is
-     (if Self.Token = Name_Token then Name_Fragment else String_Fragment);
+   function Text_Fragment_Kind (Self : Parser) return Event_Kind
+   is (if Self.Token = Name_Token then Name_Fragment else String_Fragment);
 
    procedure Emit_Inline_Text
-     (Self   : Parser;
-      Result : in out Next_Result;
-      Raw_First : Byte_Offset;
-      Raw_Length : Byte_Offset;
-      Raw_First_Count : Count;
+     (Self             : Parser;
+      Result           : in out Engine_Result;
+      Raw_First        : Byte_Offset;
+      Raw_Length       : Byte_Offset;
+      Raw_First_Count  : Count;
       Raw_Count_Length : Count;
-      Decoded_First : Byte_Offset;
-      Decoded_Length : Byte_Offset;
-      Scalar : Inline_Scalar) is
+      Decoded_First    : Byte_Offset;
+      Decoded_Length   : Byte_Offset;
+      Scalar           : Inline_Scalar) is
    begin
       Set_Event
         (Result,
          Text_Fragment_Kind (Self),
          Raw_First,
          Raw_Length,
-         Has_Raw_Slice => True,
-         Raw_First     => Raw_First_Count,
-         Raw_Length    => Raw_Count_Length,
+         Has_Raw_Slice  => True,
+         Raw_First      => Raw_First_Count,
+         Raw_Length     => Raw_Count_Length,
          Decoded_Kind   => Decoded_Inline_Scalar,
          Decoded_First  => Decoded_First,
          Decoded_Length => Decoded_Length,
@@ -346,7 +350,7 @@ package body Flyology_JSON.Parser_Core is
 
    procedure Emit_Raw_Only_Text
      (Self         : Parser;
-      Result       : in out Next_Result;
+      Result       : in out Engine_Result;
       First        : Byte_Offset;
       Length       : Byte_Offset;
       First_Count  : Count;
@@ -363,11 +367,11 @@ package body Flyology_JSON.Parser_Core is
    end Emit_Raw_Only_Text;
 
    procedure Emit_Raw_Text
-     (Self        : Parser;
-      Result      : in out Next_Result;
-      First       : Byte_Offset;
-      Length      : Byte_Offset;
-      First_Count : Count;
+     (Self         : Parser;
+      Result       : in out Engine_Result;
+      First        : Byte_Offset;
+      Length       : Byte_Offset;
+      First_Count  : Count;
       Count_Length : Count) is
    begin
       Set_Event
@@ -375,20 +379,18 @@ package body Flyology_JSON.Parser_Core is
          Text_Fragment_Kind (Self),
          First,
          Length,
-         Has_Raw_Slice => True,
-         Raw_First     => First_Count,
-         Raw_Length    => Count_Length,
-         Decoded_Kind  => Decoded_Is_Raw_Range,
-         Decoded_First => First,
+         Has_Raw_Slice  => True,
+         Raw_First      => First_Count,
+         Raw_Length     => Count_Length,
+         Decoded_Kind   => Decoded_Is_Raw_Range,
+         Decoded_First  => First,
          Decoded_Length => Length);
    end Emit_Raw_Text;
 
    procedure Start_Text
-     (Self     : in out Parser;
-      Token    : Token_Kind;
-      Result   : in out Next_Result;
-      Consumed : in out Count) is
-      Start : constant Byte_Offset := Self.Next_Offset;
+     (Self : in out Parser; Token : Token_Kind; Result : in out Engine_Result; Consumed : in out Count)
+   is
+      Start  : constant Byte_Offset := Self.Next_Offset;
       Status : Parser_Duplicates.Operation_Status;
    begin
       if Token = String_Token then
@@ -429,13 +431,10 @@ package body Flyology_JSON.Parser_Core is
          Raw_Length    => 1);
    end Start_Text;
 
-   procedure Finish_Text
-     (Self     : in out Parser;
-      Result   : in out Next_Result;
-      Consumed : in out Count) is
-      Start : constant Byte_Offset := Self.Next_Offset;
-      Token : constant Token_Kind := Self.Token;
-      Status : Parser_Duplicates.Operation_Status;
+   procedure Finish_Text (Self : in out Parser; Result : in out Engine_Result; Consumed : in out Count) is
+      Start          : constant Byte_Offset := Self.Next_Offset;
+      Token          : constant Token_Kind := Self.Token;
+      Status         : Parser_Duplicates.Operation_Status;
       Classification : Parser_Duplicates.Name_Classification;
    begin
       if not Consume_One (Self, Consumed, Result) then
@@ -444,10 +443,7 @@ package body Flyology_JSON.Parser_Core is
 
       if Token = Name_Token then
          Parser_Duplicates.Complete_Name
-           (Self.Duplicate_Names,
-            Self.Stack (Self.Depth).Duplicate_Context,
-            Status,
-            Classification);
+           (Self.Duplicate_Names, Self.Stack (Self.Depth).Duplicate_Context, Status, Classification);
          if Status /= Parser_Duplicates.Operation_Succeeded then
             Fail
               (Self,
@@ -490,19 +486,20 @@ package body Flyology_JSON.Parser_Core is
       Input        : Ada.Streams.Stream_Element_Array;
       End_Of_Input : Boolean;
       Consumed     : in out Count;
-      Result       : in out Next_Result);
+      Result       : in out Engine_Result);
 
    procedure Process_Pending_UTF8_Specialized
      (Self         : in out Parser;
       Input        : Ada.Streams.Stream_Element_Array;
       End_Of_Input : Boolean;
       Consumed     : in out Count;
-      Result       : in out Next_Result) is
-      Value        : Octet;
-      Feed         : Parser_UTF8.Feed_Result;
-      Candidate    : Parser_UTF8.Decoder;
-      First_Count  : constant Count := Consumed;
-      First_Offset : constant Byte_Offset := Self.Next_Offset;
+      Result       : in out Engine_Result)
+   is
+      Value           : Octet;
+      Feed            : Parser_UTF8.Feed_Result;
+      Candidate       : Parser_UTF8.Decoder;
+      First_Count     : constant Count := Consumed;
+      First_Offset    : constant Byte_Offset := Self.Next_Offset;
       Retention_Error : Error_Code;
    begin
       while Parser_UTF8.Has_Pending_Octets (Self.UTF8) and then Consumed < Input'Length loop
@@ -539,9 +536,7 @@ package body Flyology_JSON.Parser_Core is
          if Feed.Status = Parser_UTF8.Scalar_Ready then
             if Track_Name then
                Retain_Name_Scalar
-                 (Self,
-                  (Length => Feed.Value.Length, Octets => Feed.Value.Octets),
-                  Retention_Error);
+                 (Self, (Length => Feed.Value.Length, Octets => Feed.Value.Octets), Retention_Error);
                if Retention_Error /= No_Error then
                   Defer_Failure (Self, Retention_Error, Self.UTF8_Lead_Offset);
                   Emit_Raw_Only_Text
@@ -585,11 +580,9 @@ package body Flyology_JSON.Parser_Core is
       end if;
    end Process_Pending_UTF8_Specialized;
 
-   procedure Process_Pending_Name_UTF8 is new Process_Pending_UTF8_Specialized
-     (Track_Name => True);
+   procedure Process_Pending_Name_UTF8 is new Process_Pending_UTF8_Specialized (Track_Name => True);
 
-   procedure Process_Pending_String_UTF8 is new Process_Pending_UTF8_Specialized
-     (Track_Name => False);
+   procedure Process_Pending_String_UTF8 is new Process_Pending_UTF8_Specialized (Track_Name => False);
 
    generic
       Track_Name : Boolean;
@@ -598,14 +591,15 @@ package body Flyology_JSON.Parser_Core is
       Input        : Ada.Streams.Stream_Element_Array;
       End_Of_Input : Boolean;
       Consumed     : in out Count;
-      Result       : in out Next_Result);
+      Result       : in out Engine_Result);
 
    procedure Process_Text_Specialized
      (Self         : in out Parser;
       Input        : Ada.Streams.Stream_Element_Array;
       End_Of_Input : Boolean;
       Consumed     : in out Count;
-      Result       : in out Next_Result) is
+      Result       : in out Engine_Result)
+   is
       Value               : Octet;
       Feed                : Parser_UTF8.Feed_Result;
       Candidate_UTF8      : Parser_UTF8.Decoder;
@@ -646,9 +640,7 @@ package body Flyology_JSON.Parser_Core is
             Complete_Count - First_Count);
       end Emit_Complete_Raw_Span;
 
-      procedure Emit_Completed_Scalar
-        (Scalar        : Inline_Scalar;
-         Decoded_First : Byte_Offset) is
+      procedure Emit_Completed_Scalar (Scalar : Inline_Scalar; Decoded_First : Byte_Offset) is
       begin
          if Track_Name then
             Retain_Name_Scalar (Self, Scalar, Retention_Error);
@@ -707,8 +699,7 @@ package body Flyology_JSON.Parser_Core is
                         Emit_Complete_Raw_Span;
                      elsif Consume_One (Self, Consumed, Result) then
                         Defer_Failure (Self, Name_Storage_Exhausted, Scalar_First_Offset);
-                        Emit_Raw_Only_Text
-                          (Self, Result, First_Offset, 1, First_Count, 1);
+                        Emit_Raw_Only_Text (Self, Result, First_Offset, 1, First_Count, 1);
                      end if;
                      return;
                   end if;
@@ -776,8 +767,7 @@ package body Flyology_JSON.Parser_Core is
                            Parser_UTF8.Reset (Self.UTF8);
                            Emit_Complete_Raw_Span;
                         else
-                           Defer_Failure
-                             (Self, Name_Storage_Exhausted, Scalar_First_Offset);
+                           Defer_Failure (Self, Name_Storage_Exhausted, Scalar_First_Offset);
                            Emit_Raw_Only_Text
                              (Self,
                               Result,
@@ -874,17 +864,23 @@ package body Flyology_JSON.Parser_Core is
             case Value is
                when Character'Pos ('"') | Character'Pos ('\') | Character'Pos ('/') =>
                   Code_Point := Interfaces.Unsigned_32 (Value);
-               when Character'Pos ('b') =>
+
+               when Character'Pos ('b')                                             =>
                   Code_Point := 16#08#;
-               when Character'Pos ('f') =>
+
+               when Character'Pos ('f')                                             =>
                   Code_Point := 16#0C#;
-               when Character'Pos ('n') =>
+
+               when Character'Pos ('n')                                             =>
                   Code_Point := 16#0A#;
-               when Character'Pos ('r') =>
+
+               when Character'Pos ('r')                                             =>
                   Code_Point := 16#0D#;
-               when Character'Pos ('t') =>
+
+               when Character'Pos ('t')                                             =>
                   Code_Point := 16#09#;
-               when Character'Pos ('u') =>
+
+               when Character'Pos ('u')                                             =>
                   if not Consume_One (Self, Consumed, Result) then
                      return;
                   end if;
@@ -892,7 +888,8 @@ package body Flyology_JSON.Parser_Core is
                   Self.Text_Hex_Value := 0;
                   Self.Text_Hex_Digits := 0;
                   goto Continue_Text;
-               when others =>
+
+               when others                                                          =>
                   if Consumed > Piece_First_Count then
                      Emit_Raw_Only_Text
                        (Self,
@@ -935,12 +932,10 @@ package body Flyology_JSON.Parser_Core is
                Candidate_Hex := Self.Text_Hex_Value * 16 + Digit;
 
                if Self.Text_Hex_Digits = 3
-                 and then
-                   ((Self.Text_State = Text_Unicode_Digits
-                     and then Candidate_Hex in 16#DC00# .. 16#DFFF#)
-                    or else
-                      (Self.Text_State = Text_Low_Digits
-                       and then Candidate_Hex not in 16#DC00# .. 16#DFFF#))
+                 and then ((Self.Text_State = Text_Unicode_Digits
+                            and then Candidate_Hex in 16#DC00# .. 16#DFFF#)
+                           or else (Self.Text_State = Text_Low_Digits
+                                    and then Candidate_Hex not in 16#DC00# .. 16#DFFF#))
                then
                   if Consumed > Piece_First_Count then
                      Emit_Raw_Only_Text
@@ -1003,9 +998,7 @@ package body Flyology_JSON.Parser_Core is
                end if;
             else
                Code_Point :=
-                 16#10000#
-                 + (Self.Text_High_Surrogate - 16#D800#) * 16#400#
-                 + (Code_Point - 16#DC00#);
+                 16#10000# + (Self.Text_High_Surrogate - 16#D800#) * 16#400# + (Code_Point - 16#DC00#);
                Self.Text_State := Text_Content;
                Emit_Completed_Scalar (Encode_UTF8 (Code_Point), Self.Text_High_Start);
                return;
@@ -1105,7 +1098,8 @@ package body Flyology_JSON.Parser_Core is
       Input        : Ada.Streams.Stream_Element_Array;
       End_Of_Input : Boolean;
       Consumed     : in out Count;
-      Result       : in out Next_Result) is
+      Result       : in out Engine_Result)
+   is
       Token          : constant Token_Kind := Self.Token;
       Length         : constant Natural := Literal_Length (Token);
       Local_Consumed : Count := Consumed;
@@ -1169,19 +1163,126 @@ package body Flyology_JSON.Parser_Core is
       end if;
    end Process_Literal;
 
+   procedure Process_Initial_Literal
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Consumed     : in out Count;
+      Result       : in out Engine_Result;
+      Token        : Token_Kind)
+   is
+      Length    : constant Natural := Literal_Length (Token);
+      Available : constant Count := Input'Length - Consumed;
+      Matches   : Boolean;
+      Value     : Octet;
+      Start     : constant Byte_Offset := Self.Next_Offset;
+   begin
+      --  A complete atom plus lookahead, or a final atom, can be checked
+      --  without entering the resumable literal state machine.  Keep the
+      --  state-machine path for every chunk-boundary and offset-boundary case.
+      if Available < Count (Length)
+        or else (Available = Count (Length) and then not End_Of_Input)
+        or else Self.Next_Offset > Byte_Offset'Last - Byte_Offset (Length)
+      then
+         Start_Literal (Self, Token, Consumed);
+         Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
+         return;
+      end if;
+
+      Matches :=
+        (case Token is
+           when Null_Token  =>
+             Input_Octet (Input, Consumed + 1) = Character'Pos ('u')
+             and Input_Octet (Input, Consumed + 2) = Character'Pos ('l')
+             and Input_Octet (Input, Consumed + 3) = Character'Pos ('l'),
+           when True_Token  =>
+             Input_Octet (Input, Consumed + 1) = Character'Pos ('r')
+             and Input_Octet (Input, Consumed + 2) = Character'Pos ('u')
+             and Input_Octet (Input, Consumed + 3) = Character'Pos ('e'),
+           when False_Token =>
+             Input_Octet (Input, Consumed + 1) = Character'Pos ('a')
+             and Input_Octet (Input, Consumed + 2) = Character'Pos ('l')
+             and Input_Octet (Input, Consumed + 3) = Character'Pos ('s')
+             and Input_Octet (Input, Consumed + 4) = Character'Pos ('e'),
+           when others      => False);
+
+      if not Matches then
+         Start_Literal (Self, Token, Consumed);
+         Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
+         return;
+      end if;
+
+      Consumed := Consumed + Count (Length);
+      Self.Next_Offset := Self.Next_Offset + Byte_Offset (Length);
+      Result.Consumed := Consumed;
+
+      if Consumed < Input'Length then
+         Value := Input_Octet (Input, Consumed);
+         if not Is_Token_Delimiter (Value) then
+            Begin_Scalar_Value (Self);
+            if Consume_One (Self, Consumed, Result) then
+               Fail (Self, Result, Invalid_Literal, Self.Next_Offset - 1);
+            end if;
+            return;
+         end if;
+      end if;
+
+      Begin_Scalar_Value (Self);
+      Complete_Value (Self);
+      Set_Event
+        (Result,
+         (if Token = Null_Token then Null_Value else Boolean_Value),
+         Start,
+         Byte_Offset (Length),
+         Has_Raw_Slice => True,
+         Raw_First     => Consumed - Count (Length),
+         Raw_Length    => Count (Length),
+         Boolean_Data  => Token = True_Token);
+   end Process_Initial_Literal;
+
+   pragma Inline_Always (Process_Initial_Literal);
+
    procedure Process_Number
      (Self         : in out Parser;
       Input        : Ada.Streams.Stream_Element_Array;
       End_Of_Input : Boolean;
       Consumed     : in out Count;
-      Result       : in out Next_Result) is
+      Result       : in out Engine_Result)
+   is
       First_Count  : constant Count := Consumed;
       First_Offset : constant Byte_Offset := Self.Next_Offset;
       Value        : Octet;
       Transition   : Parser_Numbers.Transition_Result;
       Candidate    : Parser_Numbers.Number_State;
+      Run_End      : Count;
+      Run_Length   : Count;
+      Offset_Room  : Byte_Offset;
    begin
       while Consumed < Input'Length loop
+         if Parser_Numbers.Scanning_Integer_Digits (Self.Number)
+           and then Input_Octet (Input, Consumed) in Zero .. Nine
+         then
+            Run_End := Consumed + 1;
+            while Run_End < Input'Length and then Input_Octet (Input, Run_End) in Zero .. Nine loop
+               Run_End := Run_End + 1;
+            end loop;
+
+            Run_Length := Run_End - Consumed;
+            Offset_Room := Byte_Offset'Last - Self.Next_Offset;
+            if Byte_Offset (Run_Length) > Offset_Room then
+               Consumed := Consumed + Count (Offset_Room);
+               Self.Next_Offset := Byte_Offset'Last;
+               Result.Consumed := Consumed;
+               Fail (Self, Result, Offset_Exhausted, Self.Next_Offset);
+               return;
+            end if;
+
+            Consumed := Run_End;
+            Self.Next_Offset := Self.Next_Offset + Byte_Offset (Run_Length);
+            Result.Consumed := Consumed;
+            exit when Consumed = Input'Length;
+         end if;
+
          Value := Input_Octet (Input, Consumed);
 
          if Is_Number_Octet (Value) then
@@ -1271,7 +1372,9 @@ package body Flyology_JSON.Parser_Core is
       end if;
    end Process_Number;
 
-   procedure Start_Number (Self : in out Parser; Result : in out Next_Result) is
+   pragma Inline_Always (Process_Number);
+
+   procedure Start_Number (Self : in out Parser; Result : in out Engine_Result) is
    begin
       Begin_Scalar_Value (Self);
       Self.Token := Number_Token;
@@ -1284,8 +1387,9 @@ package body Flyology_JSON.Parser_Core is
      (Self     : in out Parser;
       Kind     : Container_Kind;
       Phase    : Container_Phase;
-      Result   : in out Next_Result;
-      Consumed : in out Count) is
+      Result   : in out Engine_Result;
+      Consumed : in out Count)
+   is
       Start : constant Byte_Offset := Self.Next_Offset;
    begin
       if Self.Depth = Self.Maximum_Depth then
@@ -1301,8 +1405,7 @@ package body Flyology_JSON.Parser_Core is
       Self.Depth := Self.Depth + 1;
       Self.Stack (Self.Depth) := (Phase => Phase, Duplicate_Context => <>);
       if Kind = Object_Container then
-         Parser_Duplicates.Begin_Object
-           (Self.Duplicate_Names, Self.Stack (Self.Depth).Duplicate_Context);
+         Parser_Duplicates.Begin_Object (Self.Duplicate_Names, Self.Stack (Self.Depth).Duplicate_Context);
       end if;
       Set_Event
         (Result,
@@ -1315,10 +1418,8 @@ package body Flyology_JSON.Parser_Core is
    end Push_Container;
 
    procedure Close_Container
-     (Self     : in out Parser;
-      Kind     : Container_Kind;
-      Result   : in out Next_Result;
-      Consumed : in out Count) is
+     (Self : in out Parser; Kind : Container_Kind; Result : in out Engine_Result; Consumed : in out Count)
+   is
       Start : constant Byte_Offset := Self.Next_Offset;
    begin
       if not Consume_One (Self, Consumed, Result) then
@@ -1326,8 +1427,7 @@ package body Flyology_JSON.Parser_Core is
       end if;
 
       if Kind = Object_Container then
-         Parser_Duplicates.End_Object
-           (Self.Duplicate_Names, Self.Stack (Self.Depth).Duplicate_Context);
+         Parser_Duplicates.End_Object (Self.Duplicate_Names, Self.Stack (Self.Depth).Duplicate_Context);
       end if;
       Self.Depth := Self.Depth - 1;
       if Self.Depth = 0 then
@@ -1335,13 +1435,7 @@ package body Flyology_JSON.Parser_Core is
       end if;
 
       Set_Event
-        (Result,
-         (if Kind = Array_Container then Array_End else Object_End),
-         Start,
-         1,
-         True,
-         Consumed - 1,
-         1);
+        (Result, (if Kind = Array_Container then Array_End else Object_End), Start, 1, True, Consumed - 1, 1);
    end Close_Container;
 
    procedure Initialize (Self : in out Parser) is
@@ -1367,235 +1461,692 @@ package body Flyology_JSON.Parser_Core is
       end if;
    end Initialize;
 
+   generic
+      with procedure Publish (Item : Buffered_Event; Buffer_Full : out Boolean);
+      --  True for Amount guarantees that the next Amount - 1 Publish
+      --  operations cannot report full; the Amount-th may report full.
+      with function Can_Publish (Amount : Count) return Boolean;
+   procedure Run
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Result       : out Engine_Result);
+
+   procedure Run
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Result       : out Engine_Result)
+   is
+      Consumed    : Count := 0;
+      Value       : Octet;
+      Buffer_Full : Boolean;
+
+      procedure Process_Initial_Number_Burst (Stop_Run : out Boolean) is
+         Published_Kind   : Event_Kind;
+         Zero_Is_Complete : constant Boolean :=
+           Input_Octet (Input, Consumed) = Zero
+           and then Self.Next_Offset /= Byte_Offset'Last
+           and then ((Consumed + 1 < Input'Length
+                      and then Is_Token_Delimiter (Input_Octet (Input, Consumed + 1)))
+                     or else (Consumed + 1 = Input'Length and then End_Of_Input));
+         Zero_Start       : constant Byte_Offset := Self.Next_Offset;
+         Zero_Transition  : Parser_Numbers.Transition_Result;
+      begin
+         Start_Number (Self, Result);
+         if Zero_Is_Complete then
+            Publish (Result.Item, Buffer_Full);
+            if Buffer_Full then
+               Stop_Run := True;
+               return;
+            end if;
+
+            Parser_Numbers.Push (Self.Number, Zero, Zero_Transition);
+            pragma Assert (Zero_Transition = Parser_Numbers.Transition_Accepted);
+            if not Consume_One (Self, Consumed, Result) then
+               Stop_Run := True;
+               return;
+            end if;
+            Set_Event
+              (Result,
+               Number_Fragment,
+               Zero_Start,
+               1,
+               Has_Raw_Slice => True,
+               Raw_First     => Consumed - 1,
+               Raw_Length    => 1);
+            Publish (Result.Item, Buffer_Full);
+            if Buffer_Full then
+               Stop_Run := True;
+               return;
+            end if;
+
+            Self.Token := No_Token;
+            Complete_Value (Self);
+            Set_Event (Result, Number_End, Self.Next_Offset, 0);
+            Publish (Result.Item, Buffer_Full);
+            Stop_Run := Buffer_Full;
+            return;
+         end if;
+
+         loop
+            Published_Kind := Result.Item.Kind;
+            Publish (Result.Item, Buffer_Full);
+            if Buffer_Full then
+               Stop_Run := True;
+               return;
+            elsif Published_Kind = Number_End then
+               Stop_Run := False;
+               return;
+            end if;
+
+            Result.Outcome := Need_Input;
+            Result.Diagnostic := Empty_Diagnostic;
+            Process_Number (Self, Input, End_Of_Input, Consumed, Result);
+            if Result.Outcome /= Event_Ready then
+               Stop_Run := True;
+               return;
+            end if;
+         end loop;
+      end Process_Initial_Number_Burst;
+
+      pragma Inline_Always (Process_Initial_Number_Burst);
+
+      procedure Process_Dense_Array_Burst (Stop_Run : out Boolean) is
+         Token          : Token_Kind;
+         Length         : Natural;
+         Matches        : Boolean;
+         Complete_Limit : Count := 0;
+         Scalar_Start   : Byte_Offset;
+      begin
+         loop
+            Complete_Limit := 0;
+            if Consumed = Input'Length or else Input_Octet (Input, Consumed) /= Comma then
+               Stop_Run := False;
+               return;
+            end if;
+
+            --  A complete literal after the comma leaves this array frame in
+            --  Array_Comma_Or_End.  Validate the entire transition before any
+            --  effect, then advance the comma and literal together without
+            --  writing the transient Array_Value phase.
+            if Consumed + 1 < Input'Length then
+               Value := Input_Octet (Input, Consumed + 1);
+
+               --  A complete zero has a fixed three-event transcript.  When
+               --  the publisher can accept that whole transcript, finish it
+               --  without materializing resumable number-token state.  Small
+               --  buffers and Next retain the ordinary incremental path.
+               --  Token stays No_Token; a later number resets the dormant DFA
+               --  before use.
+               if Value = Zero
+                 and then Can_Publish (3)
+                 and then Self.Next_Offset <= Byte_Offset'Last - 2
+                 and then ((Consumed + 2 < Input'Length
+                            and then Is_Token_Delimiter (Input_Octet (Input, Consumed + 2)))
+                           or else (Consumed + 2 = Input'Length and then End_Of_Input))
+               then
+                  Scalar_Start := Self.Next_Offset + 1;
+                  Consumed := Consumed + 2;
+                  Self.Next_Offset := Self.Next_Offset + 2;
+                  Result.Consumed := Consumed;
+
+                  Set_Event (Result, Number_Begin, Scalar_Start, 0);
+                  Publish (Result.Item, Buffer_Full);
+                  pragma Assert (not Buffer_Full);
+
+                  Set_Event
+                    (Result,
+                     Number_Fragment,
+                     Scalar_Start,
+                     1,
+                     Has_Raw_Slice => True,
+                     Raw_First     => Consumed - 1,
+                     Raw_Length    => 1);
+                  Publish (Result.Item, Buffer_Full);
+                  pragma Assert (not Buffer_Full);
+
+                  Set_Event (Result, Number_End, Self.Next_Offset, 0);
+                  Publish (Result.Item, Buffer_Full);
+                  if Buffer_Full then
+                     Stop_Run := True;
+                     return;
+                  end if;
+                  goto Continue_Dense_Array;
+               end if;
+
+               Token :=
+                 (if Value = Character'Pos ('n')
+                  then Null_Token
+                  elsif Value = Character'Pos ('t')
+                  then True_Token
+                  elsif Value = Character'Pos ('f')
+                  then False_Token
+                  else No_Token);
+               Length := (if Token = No_Token then 0 else Literal_Length (Token));
+               if Token /= No_Token and then Count (Length + 1) <= Input'Length - Consumed then
+                  Complete_Limit := Consumed + Count (Length + 1);
+               end if;
+               if Token /= No_Token
+                 and then Complete_Limit /= 0
+                 and then (Complete_Limit < Input'Length or else End_Of_Input)
+                 and then Self.Next_Offset <= Byte_Offset'Last - Byte_Offset (Length + 1)
+               then
+                  Matches :=
+                    (case Token is
+                       when Null_Token  =>
+                         Input_Octet (Input, Consumed + 2) = Character'Pos ('u')
+                         and Input_Octet (Input, Consumed + 3) = Character'Pos ('l')
+                         and Input_Octet (Input, Consumed + 4) = Character'Pos ('l'),
+                       when True_Token  =>
+                         Input_Octet (Input, Consumed + 2) = Character'Pos ('r')
+                         and Input_Octet (Input, Consumed + 3) = Character'Pos ('u')
+                         and Input_Octet (Input, Consumed + 4) = Character'Pos ('e'),
+                       when False_Token =>
+                         Input_Octet (Input, Consumed + 2) = Character'Pos ('a')
+                         and Input_Octet (Input, Consumed + 3) = Character'Pos ('l')
+                         and Input_Octet (Input, Consumed + 4) = Character'Pos ('s')
+                         and Input_Octet (Input, Consumed + 5) = Character'Pos ('e'),
+                       when others      => False);
+                  if Matches
+                    and then (Complete_Limit = Input'Length
+                              or else Is_Token_Delimiter (Input_Octet (Input, Complete_Limit)))
+                  then
+                     Scalar_Start := Self.Next_Offset + 1;
+                     Consumed := Complete_Limit;
+                     Self.Next_Offset := Self.Next_Offset + Byte_Offset (Length + 1);
+                     Result.Consumed := Consumed;
+                     Set_Event
+                       (Result,
+                        (if Token = Null_Token then Null_Value else Boolean_Value),
+                        Scalar_Start,
+                        Byte_Offset (Length),
+                        Has_Raw_Slice => True,
+                        Raw_First     => Consumed - Count (Length),
+                        Raw_Length    => Count (Length),
+                        Boolean_Data  => Token = True_Token);
+                     Publish (Result.Item, Buffer_Full);
+                     if Buffer_Full then
+                        Stop_Run := True;
+                        return;
+                     end if;
+                     goto Continue_Dense_Array;
+                  end if;
+               end if;
+            end if;
+
+            if not Consume_One (Self, Consumed, Result) then
+               Stop_Run := True;
+               return;
+            end if;
+            Self.Stack (Self.Depth).Phase := Array_Value;
+
+            if Consumed = Input'Length then
+               Stop_Run := False;
+               return;
+            end if;
+
+            Value := Input_Octet (Input, Consumed);
+            Token :=
+              (if Value = Character'Pos ('n')
+               then Null_Token
+               elsif Value = Character'Pos ('t')
+               then True_Token
+               elsif Value = Character'Pos ('f')
+               then False_Token
+               else No_Token);
+
+            if Token /= No_Token then
+               Result.Outcome := Need_Input;
+               Result.Diagnostic := Empty_Diagnostic;
+               Process_Initial_Literal (Self, Input, End_Of_Input, Consumed, Result, Token);
+               if Result.Outcome /= Event_Ready then
+                  Stop_Run := True;
+                  return;
+               end if;
+
+               Publish (Result.Item, Buffer_Full);
+               if Buffer_Full then
+                  Stop_Run := True;
+                  return;
+               end if;
+            elsif Value = Minus or else Value in Zero .. Nine then
+               Process_Initial_Number_Burst (Stop_Run);
+               if Stop_Run then
+                  return;
+               end if;
+            else
+               Stop_Run := False;
+               return;
+            end if;
+
+            <<Continue_Dense_Array>>
+            null;
+         end loop;
+      end Process_Dense_Array_Burst;
+
+      pragma Inline_Always (Process_Dense_Array_Burst);
+
+      Stop_Run : Boolean;
+   begin
+      Clear_Result (Result);
+
+      Engine_Loop :
+      loop
+         Result.Outcome := Need_Input;
+         Result.Diagnostic := Empty_Diagnostic;
+
+         One_Event :
+         loop
+            if Self.Current_State = Ready then
+               Self.Current_State := Active;
+               Set_Event (Result, Document_Begin, Self.Next_Offset, 0);
+               exit One_Event;
+            elsif Self.Current_State = Failure_Pending then
+               Self.Current_State := Failed;
+               Result.Outcome := Parse_Failed;
+               Result.Diagnostic := Self.Last_Diagnostic;
+               exit One_Event;
+            elsif Self.Current_State /= Active then
+               Result.Outcome := Call_Rejected;
+               Result.Diagnostic := (Code => Invalid_State, Offset => Self.Next_Offset);
+               exit One_Event;
+            end if;
+
+            if Self.Token = Number_Token then
+               Process_Number (Self, Input, End_Of_Input, Consumed, Result);
+               exit One_Event;
+            elsif Self.Token in Null_Token | True_Token | False_Token then
+               Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
+               exit One_Event;
+            elsif Self.Token = Name_Token then
+               Process_Name_Text (Self, Input, End_Of_Input, Consumed, Result);
+               exit One_Event;
+            elsif Self.Token = String_Token then
+               Process_String_Text (Self, Input, End_Of_Input, Consumed, Result);
+               exit One_Event;
+            end if;
+
+            if Self.Root_Complete and then not Self.Document_End_Sent then
+               Self.Document_End_Sent := True;
+               Set_Event (Result, Document_End, Self.Next_Offset, 0);
+               exit One_Event;
+            end if;
+
+            Grammar_Loop :
+            loop
+               while Consumed < Input'Length and then Is_Whitespace (Input_Octet (Input, Consumed)) loop
+                  exit when not Consume_One (Self, Consumed, Result);
+               end loop;
+
+               if Self.Current_State = Failed then
+                  exit One_Event;
+               end if;
+
+               if Consumed = Input'Length then
+                  if End_Of_Input then
+                     if Self.Document_End_Sent then
+                        Self.Current_State := Completed;
+                        Result.Outcome := Document_Complete;
+                     else
+                        Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+                     end if;
+                  else
+                     Result.Outcome := Need_Input;
+                  end if;
+                  exit One_Event;
+               end if;
+
+               Value := Input_Octet (Input, Consumed);
+
+               if Self.Document_End_Sent then
+                  if Consume_One (Self, Consumed, Result) then
+                     Fail (Self, Result, Trailing_Input, Self.Next_Offset - 1);
+                  end if;
+                  exit One_Event;
+               end if;
+
+               if Self.Depth > 0 then
+                  case Self.Stack (Self.Depth).Phase is
+                     when Array_Comma_Or_End          =>
+                        if Value = Comma then
+                           Process_Dense_Array_Burst (Stop_Run);
+                           if Stop_Run then
+                              Result.Consumed := Consumed;
+                              return;
+                           end if;
+                           goto Continue_Parsing;
+                        elsif Value = Right_Bracket then
+                           Close_Container (Self, Array_Container, Result, Consumed);
+                           exit One_Event;
+                        else
+                           if Consume_One (Self, Consumed, Result) then
+                              Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                           end if;
+                           exit One_Event;
+                        end if;
+
+                     when Object_Comma_Or_End         =>
+                        if Value = Comma then
+                           if not Consume_One (Self, Consumed, Result) then
+                              exit One_Event;
+                           end if;
+                           Self.Stack (Self.Depth).Phase := Object_Name;
+                           goto Continue_Parsing;
+                        elsif Value = Right_Brace then
+                           Close_Container (Self, Object_Container, Result, Consumed);
+                           exit One_Event;
+                        else
+                           if Consume_One (Self, Consumed, Result) then
+                              Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                           end if;
+                           exit One_Event;
+                        end if;
+
+                     when Object_First_Or_End         =>
+                        if Value = Right_Brace then
+                           Close_Container (Self, Object_Container, Result, Consumed);
+                           exit One_Event;
+                        elsif Value = Quote then
+                           Start_Text (Self, Name_Token, Result, Consumed);
+                           exit One_Event;
+                        else
+                           if Consume_One (Self, Consumed, Result) then
+                              Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                           end if;
+                           exit One_Event;
+                        end if;
+
+                     when Object_Name                 =>
+                        if Value = Quote then
+                           Start_Text (Self, Name_Token, Result, Consumed);
+                        else
+                           if Consume_One (Self, Consumed, Result) then
+                              Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                           end if;
+                        end if;
+                        exit One_Event;
+
+                     when Object_Colon | Object_Value =>
+                        if Self.Stack (Self.Depth).Phase = Object_Colon then
+                           if Value = Colon then
+                              if not Consume_One (Self, Consumed, Result) then
+                                 exit One_Event;
+                              end if;
+                              Self.Stack (Self.Depth).Phase := Object_Value;
+                              goto Continue_Parsing;
+                           else
+                              if Consume_One (Self, Consumed, Result) then
+                                 Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                              end if;
+                              exit One_Event;
+                           end if;
+                        end if;
+
+                     when Array_First_Or_End          =>
+                        if Value = Right_Bracket then
+                           Close_Container (Self, Array_Container, Result, Consumed);
+                           exit One_Event;
+                        end if;
+
+                     when Array_Value                 =>
+                        if Value = Right_Bracket then
+                           if Consume_One (Self, Consumed, Result) then
+                              Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                           end if;
+                           exit One_Event;
+                        end if;
+                  end case;
+               end if;
+
+               if not Value_Is_Expected (Self) then
+                  if Consume_One (Self, Consumed, Result) then
+                     Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                  end if;
+                  exit One_Event;
+               end if;
+
+               if Value = Left_Bracket then
+                  Push_Container (Self, Array_Container, Array_First_Or_End, Result, Consumed);
+                  exit One_Event;
+               elsif Value = Left_Brace then
+                  Push_Container (Self, Object_Container, Object_First_Or_End, Result, Consumed);
+                  exit One_Event;
+               elsif Value = Quote then
+                  Start_Text (Self, String_Token, Result, Consumed);
+                  exit One_Event;
+               elsif Value = Character'Pos ('n') then
+                  Process_Initial_Literal (Self, Input, End_Of_Input, Consumed, Result, Null_Token);
+                  exit One_Event;
+               elsif Value = Character'Pos ('t') then
+                  Process_Initial_Literal (Self, Input, End_Of_Input, Consumed, Result, True_Token);
+                  exit One_Event;
+               elsif Value = Character'Pos ('f') then
+                  Process_Initial_Literal (Self, Input, End_Of_Input, Consumed, Result, False_Token);
+                  exit One_Event;
+               elsif Value = Minus or else Value in Zero .. Nine then
+                  Process_Initial_Number_Burst (Stop_Run);
+                  if Stop_Run then
+                     Result.Consumed := Consumed;
+                     return;
+                  end if;
+                  goto Continue_Parsing;
+               else
+                  if Consume_One (Self, Consumed, Result) then
+                     Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                  end if;
+                  exit One_Event;
+               end if;
+
+               <<Continue_Parsing>>
+               null;
+            end loop Grammar_Loop;
+         end loop One_Event;
+
+         Result.Consumed := Consumed;
+         exit Engine_Loop when Result.Outcome /= Event_Ready;
+
+         Publish (Result.Item, Buffer_Full);
+         exit Engine_Loop when Buffer_Full;
+      end loop Engine_Loop;
+   end Run;
+
+   function To_Event (Item : Buffered_Event; Input_First : Byte_Offset) return Event is
+      Raw                   : Chunk_Range := (First_Count => 0, Octet_Length => 0);
+      Decoded_Source        : Source_Range := (First => 0, Octet_Length => 0);
+      Decoded_Value         : Inline_Scalar := (Length => 0, Octets => [others => 0]);
+      Has_Raw               : constant Boolean := (Item.Metadata and Has_Raw_Bit) /= 0;
+      Decoded_Kind_Position : constant Interfaces.Unsigned_16 :=
+        (Item.Metadata / Decoded_Kind_Factor) and 2#11#;
+      Decoded_Kind          : constant Decoded_Fragment_Kind :=
+        Decoded_Fragment_Kind'Val (Natural (Decoded_Kind_Position));
+      Scalar_Length         : constant Natural := Natural ((Item.Metadata / Scalar_Length_Factor) and 2#111#);
+      Decoded_Length        : constant Byte_Offset :=
+        Byte_Offset ((Item.Metadata / Decoded_Length_Factor) and 2#1111#);
+   begin
+      if Has_Raw then
+         Raw :=
+           (First_Count  => Count (Item.Source.First - Input_First),
+            Octet_Length => Count (Item.Source.Octet_Length));
+      end if;
+
+      case Decoded_Kind is
+         when No_Decoded_Fragment   =>
+            null;
+
+         when Decoded_Is_Raw_Range  =>
+            Decoded_Source := Item.Source;
+
+         when Decoded_Inline_Scalar =>
+            Decoded_Source :=
+              (First        => Item.Source.First + Item.Source.Octet_Length - Decoded_Length,
+               Octet_Length => Decoded_Length);
+            Decoded_Value := (Length => Scalar_Length, Octets => Item.Scalar_Octets);
+      end case;
+
+      return
+        (Kind           => Item.Kind,
+         Source         => Item.Source,
+         Has_Raw_Slice  => Has_Raw,
+         Raw_Slice      => Raw,
+         Decoded_Kind   => Decoded_Kind,
+         Decoded_Source => Decoded_Source,
+         Decoded        => Decoded_Value,
+         Boolean_Data   => (Item.Metadata and Boolean_Bit) /= 0);
+   end To_Event;
+
+   function Buffered_Kind (Item : Buffered_Event) return Event_Kind
+   is (Item.Kind);
+
+   function Buffered_Source (Item : Buffered_Event) return Source_Range
+   is (Item.Source);
+
+   procedure Publish_One (Item : Buffered_Event; Buffer_Full : out Boolean) is
+   begin
+      pragma Unreferenced (Item);
+      Buffer_Full := True;
+   end Publish_One;
+
+   pragma Inline_Always (Publish_One);
+
+   function Next_Can_Publish (Amount : Count) return Boolean
+   is (Amount <= 1);
+
+   pragma Inline_Always (Next_Can_Publish);
+
+   procedure Run_Next is new Run (Publish => Publish_One, Can_Publish => Next_Can_Publish);
+
    procedure Next
      (Self         : in out Parser;
       Input        : Ada.Streams.Stream_Element_Array;
       End_Of_Input : Boolean;
-      Result       : out Next_Result) is
-      Consumed : Count := 0;
-      Value    : Octet;
+      Result       : out Next_Result)
+   is
+      Input_First : constant Byte_Offset := Self.Next_Offset;
+      Scratch     : Engine_Result;
    begin
-      Clear_Result (Result);
-
-      if Self.Current_State = Ready then
-         Self.Current_State := Active;
-         Set_Event (Result, Document_Begin, Self.Next_Offset, 0);
-         return;
-      elsif Self.Current_State = Failure_Pending then
-         Self.Current_State := Failed;
-         Result.Outcome := Parse_Failed;
-         Result.Diagnostic := Self.Last_Diagnostic;
-         return;
-      elsif Self.Current_State /= Active then
-         Result.Outcome := Call_Rejected;
-         Result.Diagnostic := (Code => Invalid_State, Offset => Self.Next_Offset);
-         return;
-      end if;
-
-      if Self.Token = Number_Token then
-         Process_Number (Self, Input, End_Of_Input, Consumed, Result);
-         Result.Consumed := Consumed;
-         return;
-      elsif Self.Token in Null_Token | True_Token | False_Token then
-         Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
-         Result.Consumed := Consumed;
-         return;
-      elsif Self.Token = Name_Token then
-         Process_Name_Text (Self, Input, End_Of_Input, Consumed, Result);
-         Result.Consumed := Consumed;
-         return;
-      elsif Self.Token = String_Token then
-         Process_String_Text (Self, Input, End_Of_Input, Consumed, Result);
-         Result.Consumed := Consumed;
-         return;
-      end if;
-
-      if Self.Root_Complete and then not Self.Document_End_Sent then
-         Self.Document_End_Sent := True;
-         Set_Event (Result, Document_End, Self.Next_Offset, 0);
-         return;
-      end if;
-
-      loop
-         while Consumed < Input'Length and then Is_Whitespace (Input_Octet (Input, Consumed)) loop
-            exit when not Consume_One (Self, Consumed, Result);
-         end loop;
-
-         if Self.Current_State = Failed then
-            return;
-         end if;
-
-         if Consumed = Input'Length then
-            if End_Of_Input then
-               if Self.Document_End_Sent then
-                  Self.Current_State := Completed;
-                  Result.Outcome := Document_Complete;
-               else
-                  Fail (Self, Result, Truncated_Input, Self.Next_Offset);
-               end if;
-            else
-               Result.Outcome := Need_Input;
-            end if;
-            Result.Consumed := Consumed;
-            return;
-         end if;
-
-         Value := Input_Octet (Input, Consumed);
-
-         if Self.Document_End_Sent then
-            if Consume_One (Self, Consumed, Result) then
-               Fail (Self, Result, Trailing_Input, Self.Next_Offset - 1);
-            end if;
-            return;
-         end if;
-
-         if Self.Depth > 0 then
-            case Self.Stack (Self.Depth).Phase is
-               when Array_Comma_Or_End =>
-                  if Value = Comma then
-                     if not Consume_One (Self, Consumed, Result) then
-                        return;
-                     end if;
-                     Self.Stack (Self.Depth).Phase := Array_Value;
-                     goto Continue_Parsing;
-                  elsif Value = Right_Bracket then
-                     Close_Container (Self, Array_Container, Result, Consumed);
-                     return;
-                  else
-                     if Consume_One (Self, Consumed, Result) then
-                        Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
-                     end if;
-                     return;
-                  end if;
-
-               when Object_Comma_Or_End =>
-                  if Value = Comma then
-                     if not Consume_One (Self, Consumed, Result) then
-                        return;
-                     end if;
-                     Self.Stack (Self.Depth).Phase := Object_Name;
-                     goto Continue_Parsing;
-                  elsif Value = Right_Brace then
-                     Close_Container (Self, Object_Container, Result, Consumed);
-                     return;
-                  else
-                     if Consume_One (Self, Consumed, Result) then
-                        Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
-                     end if;
-                     return;
-                  end if;
-
-               when Object_First_Or_End =>
-                  if Value = Right_Brace then
-                     Close_Container (Self, Object_Container, Result, Consumed);
-                     return;
-                  elsif Value = Quote then
-                     Start_Text (Self, Name_Token, Result, Consumed);
-                     return;
-                  else
-                     if Consume_One (Self, Consumed, Result) then
-                        Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
-                     end if;
-                     return;
-                  end if;
-
-               when Object_Name =>
-                  if Value = Quote then
-                     Start_Text (Self, Name_Token, Result, Consumed);
-                  else
-                     if Consume_One (Self, Consumed, Result) then
-                        Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
-                     end if;
-                  end if;
-                  return;
-
-               when Object_Colon | Object_Value =>
-                  if Self.Stack (Self.Depth).Phase = Object_Colon then
-                     if Value = Colon then
-                        if not Consume_One (Self, Consumed, Result) then
-                           return;
-                        end if;
-                        Self.Stack (Self.Depth).Phase := Object_Value;
-                        goto Continue_Parsing;
-                     else
-                        if Consume_One (Self, Consumed, Result) then
-                           Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
-                        end if;
-                        return;
-                     end if;
-                  end if;
-
-               when Array_First_Or_End =>
-                  if Value = Right_Bracket then
-                     Close_Container (Self, Array_Container, Result, Consumed);
-                     return;
-                  end if;
-
-               when Array_Value =>
-                  if Value = Right_Bracket then
-                     if Consume_One (Self, Consumed, Result) then
-                        Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
-                     end if;
-                     return;
-                  end if;
-            end case;
-         end if;
-
-         if not Value_Is_Expected (Self) then
-            if Consume_One (Self, Consumed, Result) then
-               Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
-            end if;
-            return;
-         end if;
-
-         if Value = Left_Bracket then
-            Push_Container (Self, Array_Container, Array_First_Or_End, Result, Consumed);
-            return;
-         elsif Value = Left_Brace then
-            Push_Container (Self, Object_Container, Object_First_Or_End, Result, Consumed);
-            return;
-         elsif Value = Quote then
-            Start_Text (Self, String_Token, Result, Consumed);
-            return;
-         elsif Value = Character'Pos ('n') then
-            Start_Literal (Self, Null_Token, Consumed);
-            Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
-            Result.Consumed := Consumed;
-            return;
-         elsif Value = Character'Pos ('t') then
-            Start_Literal (Self, True_Token, Consumed);
-            Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
-            Result.Consumed := Consumed;
-            return;
-         elsif Value = Character'Pos ('f') then
-            Start_Literal (Self, False_Token, Consumed);
-            Process_Literal (Self, Input, End_Of_Input, Consumed, Result);
-            Result.Consumed := Consumed;
-            return;
-         elsif Value = Minus or else Value in Zero .. Nine then
-            Start_Number (Self, Result);
-            Result.Consumed := Consumed;
-            return;
-         else
-            if Consume_One (Self, Consumed, Result) then
-               Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
-            end if;
-            return;
-         end if;
-
-         <<Continue_Parsing>>
-         null;
-      end loop;
+      Run_Next (Self, Input, End_Of_Input, Scratch);
+      Result :=
+        (Outcome    => Scratch.Outcome,
+         Consumed   => Scratch.Consumed,
+         Item       => To_Event (Scratch.Item, Input_First),
+         Diagnostic => Scratch.Diagnostic);
    end Next;
+
+   procedure Drain
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Events       : out Event_Array;
+      Result       : out Drain_Result)
+   is
+      Capacity    : constant Count := Count (Events'Length);
+      First_Event : constant Ada.Streams.Stream_Element_Offset := Events'First;
+      Input_First : constant Byte_Offset := Self.Next_Offset;
+      Produced    : Count := 0;
+      Scratch     : Engine_Result;
+
+      procedure Publish_Many (Item : Buffered_Event; Buffer_Full : out Boolean) is
+      begin
+         Events (First_Event + Ada.Streams.Stream_Element_Offset (Produced)) := To_Event (Item, Input_First);
+         Produced := Produced + 1;
+         Buffer_Full := Produced = Capacity;
+      end Publish_Many;
+
+      pragma Inline_Always (Publish_Many);
+
+      --  Publish_Many maintains Produced <= Capacity.
+      function Many_Can_Publish (Amount : Count) return Boolean
+      is (Amount <= Capacity - Produced);
+
+      pragma Inline_Always (Many_Can_Publish);
+
+      procedure Run_Many is new Run (Publish => Publish_Many, Can_Publish => Many_Can_Publish);
+   begin
+      if Capacity = 0 then
+         Result := (Stop => Drain_Buffer_Full, Consumed => 0, Produced => 0, Diagnostic => Empty_Diagnostic);
+         return;
+      end if;
+
+      Run_Many (Self, Input, End_Of_Input, Scratch);
+      Result :=
+        (Stop       =>
+           (case Scratch.Outcome is
+              when Event_Ready       => Drain_Buffer_Full,
+              when Need_Input        => Drain_Need_Input,
+              when Document_Complete => Drain_Document_Complete,
+              when Parse_Failed      => Drain_Parse_Failed,
+              when Call_Rejected     => Drain_Call_Rejected),
+         Consumed   => Scratch.Consumed,
+         Produced   => Produced,
+         Diagnostic => Scratch.Diagnostic);
+   end Drain;
+
+   procedure Buffered_Drain
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Events       : out Buffered_Event_Array;
+      Result       : out Buffered_Drain_Result)
+   is
+      Capacity    : constant Count := Count (Events'Length);
+      First_Event : constant Ada.Streams.Stream_Element_Offset := Events'First;
+      Input_First : constant Byte_Offset := Self.Next_Offset;
+      Produced    : Count := 0;
+      Scratch     : Engine_Result;
+
+      procedure Publish_Buffered (Item : Buffered_Event; Buffer_Full : out Boolean) is
+      begin
+         Events (First_Event + Ada.Streams.Stream_Element_Offset (Produced)) := Item;
+         Produced := Produced + 1;
+         Buffer_Full := Produced = Capacity;
+      end Publish_Buffered;
+
+      pragma Inline_Always (Publish_Buffered);
+
+      --  Publish_Buffered maintains Produced <= Capacity.
+      function Buffered_Can_Publish (Amount : Count) return Boolean
+      is (Amount <= Capacity - Produced);
+
+      pragma Inline_Always (Buffered_Can_Publish);
+
+      procedure Run_Buffered is new Run (Publish => Publish_Buffered, Can_Publish => Buffered_Can_Publish);
+   begin
+      if Capacity = 0 then
+         Result :=
+           (Stop        => Drain_Buffer_Full,
+            Input_First => Input_First,
+            Consumed    => 0,
+            Produced    => 0,
+            Diagnostic  => Empty_Diagnostic);
+         return;
+      end if;
+
+      Run_Buffered (Self, Input, End_Of_Input, Scratch);
+      Result :=
+        (Stop        =>
+           (case Scratch.Outcome is
+              when Event_Ready       => Drain_Buffer_Full,
+              when Need_Input        => Drain_Need_Input,
+              when Document_Complete => Drain_Document_Complete,
+              when Parse_Failed      => Drain_Parse_Failed,
+              when Call_Rejected     => Drain_Call_Rejected),
+         Input_First => Input_First,
+         Consumed    => Scratch.Consumed,
+         Produced    => Produced,
+         Diagnostic  => Scratch.Diagnostic);
+   end Buffered_Drain;
 
    procedure Abort_Document (Self : in out Parser) is
    begin
       case Self.Current_State is
          when Uninitialized | Aborted =>
             null;
-         when Failure_Pending =>
+
+         when Failure_Pending         =>
             Self.Current_State := Failed;
-         when others =>
+
+         when others                  =>
             Self.Current_State := Aborted;
       end case;
    end Abort_Document;
@@ -1608,8 +2159,10 @@ package body Flyology_JSON.Parser_Core is
       end if;
    end Reset;
 
-   function State (Self : Parser) return Parser_State is (Self.Current_State);
+   function State (Self : Parser) return Parser_State
+   is (Self.Current_State);
 
-   function Terminal_Diagnostic (Self : Parser) return Diagnostic is (Self.Last_Diagnostic);
+   function Terminal_Diagnostic (Self : Parser) return Diagnostic
+   is (Self.Last_Diagnostic);
 
 end Flyology_JSON.Parser_Core;

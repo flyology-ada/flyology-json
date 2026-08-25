@@ -10,12 +10,12 @@ with Interfaces;
 --  is intrinsic here; future compatibility/reporting engines require their own
 --  reviewed mechanism before a public profile can select them.  This package
 --  deliberately contains no resource-accounting hooks.
+
 private package Flyology_JSON.Parser_Core is
 
    subtype Byte_Offset is Interfaces.Unsigned_64;
 
-   type Parser_State is
-     (Uninitialized, Ready, Active, Failure_Pending, Completed, Failed, Aborted);
+   type Parser_State is (Uninitialized, Ready, Active, Failure_Pending, Completed, Failed, Aborted);
 
    type Event_Kind is
      (Document_Begin,
@@ -46,8 +46,7 @@ private package Flyology_JSON.Parser_Core is
       Octet_Length : Byte_Offset;
    end record;
 
-   type Decoded_Fragment_Kind is
-     (No_Decoded_Fragment, Decoded_Is_Raw_Range, Decoded_Inline_Scalar);
+   type Decoded_Fragment_Kind is (No_Decoded_Fragment, Decoded_Is_Raw_Range, Decoded_Inline_Scalar);
 
    --  No_Decoded_Fragment covers transport pieces that do not yet complete a
    --  scalar and a complete scalar whose caller-backed name storage was
@@ -60,16 +59,22 @@ private package Flyology_JSON.Parser_Core is
    end record;
 
    type Event is record
-      Kind          : Event_Kind;
+      Kind           : Event_Kind;
       Source         : Source_Range;
-      Has_Raw_Slice : Boolean;
+      Has_Raw_Slice  : Boolean;
       --  Raw_Slice is meaningful only for the exact Input array passed to the
-      --  Next call that returned this event.  The parser retains no Input.
-      Raw_Slice     : Chunk_Range;
-      Decoded_Kind  : Decoded_Fragment_Kind;
+      --  parser call (Next or Drain) that returned this event.  The parser
+      --  retains no Input.  Raw_Slice is meaningful only when Has_Raw_Slice.
+      Raw_Slice      : Chunk_Range;
+      Decoded_Kind   : Decoded_Fragment_Kind;
+      --  Decoded_Source is meaningful for Decoded_Is_Raw_Range and
+      --  Decoded_Inline_Scalar.  Decoded is meaningful only for
+      --  Decoded_Inline_Scalar.  Ineligible fields are valid but unspecified
+      --  and must not be observed by consumers.
       Decoded_Source : Source_Range;
-      Decoded       : Inline_Scalar;
-      Boolean_Data  : Boolean;
+      Decoded        : Inline_Scalar;
+      --  Boolean_Data is meaningful only for Boolean_Value.
+      Boolean_Data   : Boolean;
    end record;
 
    type Error_Code is
@@ -104,11 +109,24 @@ private package Flyology_JSON.Parser_Core is
       Diagnostic : Parser_Core.Diagnostic;
    end record;
 
+   type Event_Array is array (Ada.Streams.Stream_Element_Offset range <>) of Event;
+
+   type Drain_Stop is
+     (Drain_Buffer_Full, Drain_Need_Input, Drain_Document_Complete, Drain_Parse_Failed, Drain_Call_Rejected);
+
+   type Drain_Result is record
+      Stop       : Drain_Stop;
+      Consumed   : Ada.Streams.Stream_Element_Count;
+      Produced   : Ada.Streams.Stream_Element_Count;
+      Diagnostic : Parser_Core.Diagnostic;
+   end record;
+
    type Parser
      (Maximum_Depth       : Natural;
       Name_Octet_Capacity : Natural;
       Name_Capacity       : Natural)
-   is limited private;
+   is
+     limited private;
 
    --  Initialize changes an Uninitialized parser to Ready.  In another state
    --  it is a nonraising no-op.
@@ -124,6 +142,56 @@ private package Flyology_JSON.Parser_Core is
       End_Of_Input : Boolean;
       Result       : out Next_Result);
 
+   --  Fill the caller's event array until it is full or parsing stops for
+   --  input, completion, or failure.  Consumed is a count from Input'First,
+   --  and every raw slice in the produced prefix refers to this exact Input.
+   --  Only the first Produced components of Events are meaningful.
+   --  Produced events remain provisional when the same call reports failure.
+   --  A null Events array returns Drain_Buffer_Full without changing Self.
+   procedure Drain
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Events       : out Event_Array;
+      Result       : out Drain_Result);
+
+   --  Unstable internal performance descriptor.  It makes no layout or ABI
+   --  promise and is not a public parser event type.
+   type Buffered_Event is private;
+
+   type Buffered_Event_Array is array (Ada.Streams.Stream_Element_Offset range <>) of Buffered_Event;
+
+   type Buffered_Drain_Result is record
+      Stop        : Drain_Stop;
+      Input_First : Byte_Offset;
+      Consumed    : Ada.Streams.Stream_Element_Count;
+      Produced    : Ada.Streams.Stream_Element_Count;
+      Diagnostic  : Parser_Core.Diagnostic;
+   end record;
+
+   --  Buffered_Drain has the same parsing, stop, and consumed-count semantics
+   --  as Drain.  Input_First is the parser's absolute byte offset before this
+   --  call.  Only the first Produced components of Events are meaningful;
+   --  their source ranges are absolute, while any raw text remains in this
+   --  exact Input.  The descriptor retains no Input reference; source text may
+   --  be resolved only against this exact actual while the caller keeps it
+   --  alive and unchanged, and must be copied before that actual is released
+   --  or reused.  A null Events array returns Drain_Buffer_Full without
+   --  changing Self.
+   procedure Buffered_Drain
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Events       : out Buffered_Event_Array;
+      Result       : out Buffered_Drain_Result);
+
+   function Buffered_Kind (Item : Buffered_Event) return Event_Kind;
+
+   function Buffered_Source (Item : Buffered_Event) return Source_Range;
+
+   pragma Inline_Always (Buffered_Kind);
+   pragma Inline_Always (Buffered_Source);
+
    procedure Abort_Document (Self : in out Parser);
 
    --  Reset creates a fresh Ready operation from Failure_Pending, Completed,
@@ -136,6 +204,19 @@ private package Flyology_JSON.Parser_Core is
    with Pre => State (Self) in Failure_Pending | Failed | Aborted;
 
 private
+
+   --  The packed metadata widths are derived from existing JSON/UTF-8
+   --  mechanics, not caller policy: three decoded kinds need two bits, a
+   --  UTF-8 scalar has at most four octets and needs three length bits, and
+   --  the longest decoded JSON escape is a 12-octet surrogate pair and needs
+   --  four length bits.  Source is kept naturally aligned; this currently
+   --  yields a 24-octet native descriptor without making that size a contract.
+   type Buffered_Event is record
+      Kind          : Event_Kind;
+      Metadata      : Interfaces.Unsigned_16;
+      Scalar_Octets : Parser_UTF8.Scalar_Octets;
+      Source        : Source_Range;
+   end record;
 
    type Container_Kind is (Array_Container, Object_Container);
 
@@ -156,16 +237,10 @@ private
 
    type Frame_Array is array (Positive range <>) of Container_Frame;
 
-   type Token_Kind is
-     (No_Token, Number_Token, Null_Token, True_Token, False_Token, Name_Token, String_Token);
+   type Token_Kind is (No_Token, Number_Token, Null_Token, True_Token, False_Token, Name_Token, String_Token);
 
    type Text_Scan_State is
-     (Text_Content,
-      Text_After_Escape,
-      Text_Unicode_Digits,
-      Text_Low_Backslash,
-      Text_Low_U,
-      Text_Low_Digits);
+     (Text_Content, Text_After_Escape, Text_Unicode_Digits, Text_Low_Backslash, Text_Low_U, Text_Low_Digits);
 
    type Parser
      (Maximum_Depth       : Natural;
@@ -184,14 +259,14 @@ private
       Token               : Token_Kind := No_Token;
       Token_Start         : Byte_Offset := 0;
       Number              : Parser_Numbers.Number_State;
-      UTF8                 : Parser_UTF8.Decoder;
-      UTF8_Lead_Offset     : Byte_Offset := 0;
-      Text_State           : Text_Scan_State := Text_Content;
-      Text_Escape_Start    : Byte_Offset := 0;
-      Text_High_Start      : Byte_Offset := 0;
-      Text_Hex_Value       : Interfaces.Unsigned_32 := 0;
-      Text_Hex_Digits      : Natural range 0 .. 4 := 0;
-      Text_High_Surrogate  : Interfaces.Unsigned_32 := 0;
+      UTF8                : Parser_UTF8.Decoder;
+      UTF8_Lead_Offset    : Byte_Offset := 0;
+      Text_State          : Text_Scan_State := Text_Content;
+      Text_Escape_Start   : Byte_Offset := 0;
+      Text_High_Start     : Byte_Offset := 0;
+      Text_Hex_Value      : Interfaces.Unsigned_32 := 0;
+      Text_Hex_Digits     : Natural range 0 .. 4 := 0;
+      Text_High_Surrogate : Interfaces.Unsigned_32 := 0;
       Literal_Position    : Natural := 0;
       Literal_Can_Slice   : Boolean := False;
       Literal_First_Count : Ada.Streams.Stream_Element_Count := 0;

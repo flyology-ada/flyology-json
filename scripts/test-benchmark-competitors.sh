@@ -85,7 +85,7 @@ FLYOLOGY_JSON_BENCH_IMPLEMENTATION=flyology_json \
 FLYOLOGY_JSON_BENCH_FIXTURE=large_array \
   "comparison_bin/$track/flyology_json-comparison_benchmark" >"$selection_output"
 test "$(wc -l <"$selection_output" | tr -d ' ')" -eq 1
-grep -Fqx 'implementation=flyology_json fixture=large_array value=14497054750' \
+grep -Fqx 'implementation=flyology_json fixture=large_array value=14497054742' \
   "$selection_output"
 FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
 FLYOLOGY_JSON_BENCH_IMPLEMENTATION=rapidjson \

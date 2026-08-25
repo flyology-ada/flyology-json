@@ -12,10 +12,18 @@ checks to both the driver and the parser units.
 
 ## Workload
 
-One logical operation initializes a parser, validates one complete document,
-and drains all provisional events through `Next`. Fixture construction and
-preflight validation happen before measurement. The result-producing batch
-interface keeps the event checksum observable after the ending timestamp.
+One standalone-parser operation initializes a parser, validates one complete
+document, and drains all provisional events through `Next`. The comparison
+driver instead uses the parser core's private compact batch descriptor. That
+descriptor carries event kind, exact source range, flags, and at most one
+decoded UTF-8 scalar; raw string and number text remains borrowed from the
+current caller input by count-based range and is never copied. Tests outside
+the timed region compare descriptor kind, exact source range, stop, consumption,
+diagnostics, and parser state with full-event `Drain` across chunk schedules
+and arbitrary Ada bounds; separate `Next`/`Drain` parity tests validate every
+eligible full-event field. Fixture construction and preflight validation happen
+before measurement. Each driver keeps its result checksum observable after the
+ending timestamp.
 
 The maintained synthetic fixtures exercise:
 
@@ -135,8 +143,10 @@ runner measurements are always classified as `directional`; they are not a
 formal regression scorecard.
 
 The parser matrix fixes semantic fixture, chunk, event, and call identities.
-`parser_bytes` remains a positive measured field in every record, but is not an
-exact cross-target identity because Ada object representation is compiler- and
+The comparison driver's 256-element descriptor buffer is an explicit benchmark
+experiment size, not a parser capacity or public default. `parser_bytes`
+remains a positive measured field in every record, but is not an exact
+cross-target identity because Ada object representation is compiler- and
 target-dependent.
 
 The comparison driver passes identical document octets to every implementation
@@ -149,14 +159,17 @@ cleanup, allocation, conversion, and simd-json's required private input copy
 are included as declared by each capability record.
 
 Flyology and RapidJSON SAX share the event lane but not identical event
-granularity: Flyology exposes incremental begin/fragment/end observations,
-whereas RapidJSON supplies one callback for each complete decoded name, string,
-or number. The harness verifies each implementation's exact expected semantic
-counters and checksum before timing. Cross-lane results remain useful context,
-not a claim that validation, event delivery, and owned-DOM construction perform
-the same work. The `compiler` field in a `flyology_bench` JSONL context names
-the Ada driver compiler; foreign compiler identities and flags are retained in
-the environment, capability records, Cargo manifest, and verbose build log.
+granularity: Flyology produces incremental begin/fragment/end descriptors in
+caller storage, whereas RapidJSON supplies one callback for each complete
+decoded name, string, or number. The Flyology timed lane visits compact private
+descriptors rather than reconstructing its larger convenience `Event` record;
+that transport distinction is part of the result interpretation. The harness
+verifies each implementation's exact expected semantic counters and checksum
+before timing. Cross-lane results remain useful context, not a claim that
+validation, event delivery, and owned-DOM construction perform the same work.
+The `compiler` field in a `flyology_bench` JSONL context names the Ada driver
+compiler; foreign compiler identities and flags are retained in the
+environment, capability records, Cargo manifest, and verbose build log.
 
 Acquire and verify the approved source archives outside the checkout with:
 

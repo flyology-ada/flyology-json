@@ -14,11 +14,8 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end if;
    end Check;
 
-   function To_Input
-     (Text : String;
-      First : Offset) return Ada.Streams.Stream_Element_Array is
-      Result : Ada.Streams.Stream_Element_Array
-        (First .. First + Offset (Text'Length) - 1);
+   function To_Input (Text : String; First : Offset) return Ada.Streams.Stream_Element_Array is
+      Result : Ada.Streams.Stream_Element_Array (First .. First + Offset (Text'Length) - 1);
    begin
       for Position in Text'Range loop
          Result (First + Offset (Position - Text'First)) := Character'Pos (Text (Position));
@@ -37,11 +34,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
    begin
       loop
          if Used < Input'Length then
-            Next
-              (Self,
-               Input (Input'First + Offset (Used) .. Input'Last),
-               True,
-               Result);
+            Next (Self, Input (Input'First + Offset (Used) .. Input'Last), True, Result);
          else
             declare
                Empty : Ada.Streams.Stream_Element_Array (1 .. 0);
@@ -73,12 +66,12 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
    begin
       declare
          Subject : Parser (0, 0, 0);
-         Input  : constant Ada.Streams.Stream_Element_Array :=
+         Input   : constant Ada.Streams.Stream_Element_Array :=
            [Offset (-11) => Character'Pos ('n'),
             Offset (-10) => Character'Pos ('u'),
             Offset (-9)  => Character'Pos ('l'),
             Offset (-8)  => Character'Pos ('l')];
-         Item   : Next_Result;
+         Item    : Next_Result;
       begin
          Begin_At (Subject, Byte_Offset'Last - 4);
          Next (Subject, Input, True, Item);
@@ -90,8 +83,8 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
 
       declare
          Subject : Parser (0, 0, 0);
-         Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("null", -13);
-         Item   : Next_Result;
+         Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("null", -13);
+         Item    : Next_Result;
       begin
          Begin_At (Subject, Byte_Offset'Last - 3);
          Next (Subject, Input, True, Item);
@@ -113,8 +106,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
          Check (not Item.Item.Boolean_Data, "false literal changed its Boolean value");
          Check (Item.Consumed = 5, "five-byte literal changed its consumed count");
          Check
-           (Subject.Next_Offset = Byte_Offset'Last,
-            "five-byte literal ending at Last changed its offset");
+           (Subject.Next_Offset = Byte_Offset'Last, "five-byte literal ending at Last changed its offset");
       end;
 
       declare
@@ -132,23 +124,21 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
 
       declare
          Subject : Parser (0, 0, 0);
-         Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("nXll", 19);
-         Item   : Next_Result;
+         Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("nXll", 19);
+         Item    : Next_Result;
       begin
          Begin_At (Subject, Byte_Offset'Last - 4);
          Next (Subject, Input, True, Item);
          Check (Item.Outcome = Parse_Failed, "literal mismatch before Last was accepted");
          Check (Item.Consumed = 2, "literal mismatch changed its consumed count");
          Check (Item.Diagnostic.Code = Invalid_Literal, "literal mismatch changed status");
-         Check
-           (Item.Diagnostic.Offset = Byte_Offset'Last - 3,
-            "literal mismatch changed its exact offset");
+         Check (Item.Diagnostic.Offset = Byte_Offset'Last - 3, "literal mismatch changed its exact offset");
       end;
 
       declare
          Subject : Parser (0, 0, 0);
-         Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("nulX", 23);
-         Item   : Next_Result;
+         Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("nulX", 23);
+         Item    : Next_Result;
       begin
          Begin_At (Subject, Byte_Offset'Last - 3);
          Next (Subject, Input, True, Item);
@@ -193,15 +183,108 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
    end Check_Literal_Offset_Boundaries;
 
+   procedure Check_Drain_Offset_Boundaries is
+      Input : constant Ada.Streams.Stream_Element_Array := To_Input ("null ", -47);
+   begin
+      declare
+         Subject : Parser (0, 0, 0);
+         Events  : Event_Array (11 .. 18);
+         Item    : Drain_Result;
+      begin
+         Begin_At (Subject, Byte_Offset'Last - 4);
+         Drain (Subject, Input, True, Events, Item);
+         Check (Item.Stop = Drain_Parse_Failed, "underfull drain accepted a byte beyond Last");
+         Check (Item.Consumed = 4, "underfull drain consumed its denied byte");
+         Check (Item.Produced = 2, "underfull drain lost provisional terminal events");
+         Check (Events (11).Kind = Null_Value, "underfull drain changed literal ordering");
+         Check (Events (12).Kind = Document_End, "underfull drain changed document-end ordering");
+         Check (Item.Diagnostic.Code = Offset_Exhausted, "underfull drain changed offset status");
+         Check (Item.Diagnostic.Offset = Byte_Offset'Last, "underfull drain moved offset failure");
+         Check (Subject.Next_Offset = Byte_Offset'Last, "underfull drain wrapped source offset");
+      end;
+
+      declare
+         Subject : Parser (0, 0, 0);
+         Events  : Event_Array (-13 .. -12);
+         Item    : Drain_Result;
+      begin
+         Begin_At (Subject, Byte_Offset'Last - 4);
+         Drain (Subject, Input, True, Events, Item);
+         Check (Item.Stop = Drain_Buffer_Full, "exact drain did not stop at its event boundary");
+         Check (Item.Consumed = 4, "exact drain consumed beyond its final event");
+         Check (Item.Produced = 2, "exact drain changed its event count");
+         Check (State (Subject) = Active, "exact drain reported following failure early");
+
+         Drain (Subject, Input (Input'Last .. Input'Last), True, Events, Item);
+         Check (Item.Stop = Drain_Parse_Failed, "exact drain did not report following exhaustion");
+         Check (Item.Consumed = 0, "exact drain consumed its denied byte");
+         Check (Item.Produced = 0, "exact drain published an event with exhaustion");
+         Check (Item.Diagnostic.Code = Offset_Exhausted, "exact drain changed offset status");
+         Check (Item.Diagnostic.Offset = Byte_Offset'Last, "exact drain moved offset failure");
+      end;
+   end Check_Drain_Offset_Boundaries;
+
+   procedure Check_Dense_Zero_Offset_Boundaries is
+      Prefix : constant Ada.Streams.Stream_Element_Array := To_Input ("[null,", -53);
+      Suffix : constant Ada.Streams.Stream_Element_Array := To_Input (",0]", 61);
+
+      procedure Prepare (Subject : in out Parser; Item : out Drain_Result) is
+         Setup_Events : Event_Array (-9 .. -7);
+      begin
+         Initialize (Subject);
+         Drain (Subject, Prefix, False, Setup_Events, Item);
+         Check (Item.Stop = Drain_Buffer_Full, "dense-zero setup did not stop before its comma");
+         Check (Item.Consumed = Prefix'Length - 1, "dense-zero setup consumed its comma");
+         Check (Item.Produced = Setup_Events'Length, "dense-zero setup changed its transcript");
+         Check (State (Subject) = Active, "dense-zero setup changed parser state");
+      end Prepare;
+   begin
+      declare
+         Subject : Parser (1, 0, 0);
+         Events  : Event_Array (-5 .. 2);
+         Item    : Drain_Result;
+      begin
+         Prepare (Subject, Item);
+         Subject.Next_Offset := Byte_Offset'Last - 2;
+         Drain (Subject, Suffix, True, Events, Item);
+         Check (Item.Stop = Drain_Parse_Failed, "dense zero accepted a byte beyond Last");
+         Check (Item.Consumed = 2, "dense zero consumed its denied closing bracket");
+         Check (Item.Produced = 3, "dense zero changed its complete transcript");
+         Check (Events (-5).Kind = Number_Begin, "dense zero omitted number begin");
+         Check (Events (-4).Kind = Number_Fragment, "dense zero omitted number fragment");
+         Check (Events (-3).Kind = Number_End, "dense zero omitted number end");
+         Check (Events (-5).Source.First = Byte_Offset'Last - 1, "dense zero moved number begin");
+         Check (Events (-4).Source.First = Byte_Offset'Last - 1, "dense zero moved number fragment");
+         Check (Events (-3).Source.First = Byte_Offset'Last, "dense zero moved number end");
+         Check (Item.Diagnostic.Code = Offset_Exhausted, "dense zero changed offset status");
+         Check (Item.Diagnostic.Offset = Byte_Offset'Last, "dense zero moved offset failure");
+      end;
+
+      declare
+         Subject : Parser (1, 0, 0);
+         Events  : Event_Array (17 .. 24);
+         Item    : Drain_Result;
+      begin
+         Prepare (Subject, Item);
+         Subject.Next_Offset := Byte_Offset'Last - 1;
+         Drain (Subject, Suffix, True, Events, Item);
+         Check (Item.Stop = Drain_Parse_Failed, "dense zero crossed Last from its comma");
+         Check (Item.Consumed = 1, "dense zero consumed its unrepresentable value byte");
+         Check (Item.Produced = 1, "dense zero lost its provisional number begin");
+         Check (Events (17).Kind = Number_Begin, "dense zero changed fallback ordering");
+         Check (Events (17).Source.First = Byte_Offset'Last, "dense zero moved fallback begin");
+         Check (Item.Diagnostic.Code = Offset_Exhausted, "dense fallback changed offset status");
+         Check (Item.Diagnostic.Offset = Byte_Offset'Last, "dense fallback moved offset failure");
+      end;
+   end Check_Dense_Zero_Offset_Boundaries;
+
    --  Explicit storage for the reset fixture; these values are not defaults.
-   Self       : Parser (1, 16, 4);
-   Result     : Next_Result;
-   Empty      : Ada.Streams.Stream_Element_Array (1 .. 0);
-   Last_Byte  : constant Ada.Streams.Stream_Element_Array :=
-     [Offset (37) => Character'Pos (' ')];
-   Denied_Byte : constant Ada.Streams.Stream_Element_Array :=
-     [Offset (-19) => Character'Pos (' ')];
-   Primary    : Diagnostic;
+   Self        : Parser (1, 16, 4);
+   Result      : Next_Result;
+   Empty       : Ada.Streams.Stream_Element_Array (1 .. 0);
+   Last_Byte   : constant Ada.Streams.Stream_Element_Array := [Offset (37) => Character'Pos (' ')];
+   Denied_Byte : constant Ada.Streams.Stream_Element_Array := [Offset (-19) => Character'Pos (' ')];
+   Primary     : Diagnostic;
 
 begin
    Initialize (Self);
@@ -241,4 +324,6 @@ begin
    Check (Self.Next_Offset = 0, "reset did not restore the source origin");
    Drain_Reused_Parser (Self);
    Check_Literal_Offset_Boundaries;
+   Check_Drain_Offset_Boundaries;
+   Check_Dense_Zero_Offset_Boundaries;
 end Flyology_JSON.Parser_Core.Offset_Tests;

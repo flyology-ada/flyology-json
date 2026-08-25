@@ -78,6 +78,14 @@ chunk schedule, profile-relevant behavior, track, timed-work inclusions, and
 output policy match. Profile disagreement fixtures are correctness evidence,
 not throughput samples. Differential agreement is never the specification.
 
+The Flyology `parse_events` adapter visits private compact event descriptors
+in caller storage. Raw text remains in the current input and is identified by
+an exact range; the adapter does not reconstruct the larger convenience
+`Event` record in the timed region. RapidJSON SAX instead invokes one callback
+for each complete decoded name, string, or number. Both satisfy the event-lane
+observables, but this transport and granularity difference is part of result
+interpretation rather than a claim of identical work.
+
 For writers, fixtures supply one immutable logical value/event sequence.
 Ordinary compact output preserves member order, contains no added whitespace
 or BOM, and does not claim canonicality. Exact byte equality is required only
