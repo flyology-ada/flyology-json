@@ -17,6 +17,7 @@ is
       Invalid_State,
       Final_Input_Retracted,
       Invalid_Writer_Grammar,
+      Writer_Interrupted,
       Unexpected_Token,
       Trailing_Input,
       Truncated_Input,

@@ -337,6 +337,19 @@ clears or promises values outside the published prefix.
 
 ## Writer destination and lifecycle
 
+The normative writer ownership, interruption, lifecycle, destination, diagnostic, and evidence
+contract is
+[`../architecture/fast-transactional-writer.md`](../architecture/fast-transactional-writer.md).
+Ordinary grammar and fragment calls are not abort-deferred. The linked contract defines
+`Interrupted`, the mandatory abort-or-unwind rule, unknown abnormal-write prefixes,
+commit-before-pending-abort delivery, atomic primary publication, narrow controlled transfer
+guards, and re-raising a contract-violating boundary exception.
+
+The following JSON grammar, bulk prefix-reporting destination statuses, exact
+token/staged/call coordinates, UTF-8 and number validation, caller-selected
+depth, whole-document staging, and commit-only publication rules complete that
+contract.
+
 The destination is a whole-document transaction. `Begin` starts unpublished
 staging; `Commit` is the only publication point; `Abort` ends staging without
 publication even when it reports cleanup failure. A failed begin owns no
@@ -349,28 +362,22 @@ that can outlive the writer or destination, violates that ownership contract.
 
 Every destination formal is synchronous, nonraising, returns in finite time,
 does not call the writer recursively, mutate writer aliases, or retain `Data`
-beyond `Write`. Every admitted mutating writer call executes as one
-abort-deferred operation, including its finite validation/scan work,
-destination calls, and adjacent JSON/ownership-state transitions. The caller
-is not required to arrange task-abort deferral. This is a deliberate
-correctness-over-cancellation-latency tradeoff: the hot per-octet loop contains
-no abort check or dispatch, while a pending task abort waits for the call's own
-finite scan and caller-supplied destination work to return.
+beyond `Write`. Hot grammar and fragment calls use the linked marker protocol;
+they do not defer abort.
 
-`Destination_Begin` must either
-complete with a coherent returned status or leave a transaction that a later
-`Destination_Abort` can end. A failed `Begin` creates no transaction. A failed
+`Destination_Begin` must complete with a coherent returned status. A failed
+`Begin` creates no transaction. A failed
 `Commit` publishes nothing and leaves the transaction abortable. A successful
 commit publishes exactly once before the writer records `Completed` in the
 same abort-deferred region. `Abort` is itself abort-safe and ends the
 transaction without publication even when its status is `Abort_Failed`.
 All destination formals may block only according to the caller-supplied
-implementation and must return. Task abort is deferred throughout them, so a
-formal that violates the finite-return obligation can delay task abort
-indefinitely. The writer adds no numeric timeout, helper task, preemption, or
-scheduling policy.
-Violating a generic formal obligation is outside the writer contract; raised
-exceptions and dangling retained input are not recovered.
+implementation and must return. The writer adds no numeric timeout, helper task,
+preemption, or scheduling policy. A destination exception violates the generic
+contract. At a guarded boundary the writer saves and re-raises the same
+exception occurrence after the guard; it does not report a false ordinary
+status and makes no ownership or publication claim. The caller must immediately
+unwind the writer owner scope without a query, abort, reset, or other reuse.
 
 `Destination_Write` is bulk and prefix-reporting. On success it accepts the
 complete array. On capacity exhaustion it accepts the longest prefix and
@@ -402,16 +409,16 @@ abort. Explicit abort without an earlier failure promotes abort failure to
 primary. Finalization is a nonraising safety net that aborts one still-owned
 transaction and cannot replace an already observable primary diagnostic.
 
-If task abort or another abnormal transfer is pending during an admitted
-mutating call, it is delivered when the abort-deferred call finishes. Before
-unwinding can escape the writer, an abort-deferred cleanup finalizer ends an
-owned unpublished transaction exactly once and seals the writer `Aborted`, so
-no later grammar call or commit is possible. Successful cleanup retains a
-cleared diagnostic when no primary failure existed; failed cleanup retains
-`Abort_Failed` at the next staged-output coordinate. An already established
-primary remains primary and abort failure is secondary. A successful commit
-that has already published and recorded `Completed` remains `Completed`; the
-cleanup finalizer never claims to retract publication.
+If task abort or another abnormal transfer interrupts a hot call after marker
+entry and before coherent completion, the writer is `Interrupted`. The staged
+prefix is unpublished and its exact length may be unknown. The owner must call
+`Abort_Document` or unwind the writer before any other use. An interruption
+without an established primary synthesizes and retains `Writer_Interrupted` at
+the interrupted call ordinal. Successful cleanup preserves that primary;
+abort failure is secondary with `No_Coordinate` when the staged prefix is
+unknown. An already atomically published primary remains primary. A
+successful commit may publish before a pending abort is delivered; completion
+remains published and cleanup never claims to retract it.
 
 `Finish_Document` requires one complete balanced root, commits, and enters
 `Completed` only on success. `Reset` is accepted only from terminal states and
@@ -432,22 +439,31 @@ The closed writer lifecycle is:
 | `Initialize` in `Uninitialized` | Valid profile: `Ready` with applied profile; invalid: `Failed`, no applied profile, no destination call. |
 | `Initialize` elsewhere | Nonmutating `Invalid_State`; retained terminal diagnostic wins. |
 | `Begin_Document` in `Ready` | Successful destination begin: `Active` and transaction owned; failed begin: `Failed`, no ownership and no abort. |
-| Grammar call in `Ready` other than `Begin_Document` | Reserves its call ordinal, returns `Invalid_Writer_Grammar`, enters `Failed`, and makes no destination call. |
-| Grammar call in `Active` (including another `Begin_Document`) | Success remains `Active`; grammar/further failure aborts once and enters `Failed`. |
+| `Begin_Document` in `Active` | Reserves an ordinal, returns `Invalid_Writer_Grammar`, aborts once, and enters `Failed`. |
+| `Begin_Document` in `Interrupted` | Nonmutating `Invalid_State`; no ordinal, output, or destination effect; retain the interruption primary. |
+| `Finish_Document` in `Ready` | Reserves an ordinal, returns `Invalid_Writer_Grammar`, enters `Failed`, and makes no destination call. |
+| Hot grammar call in `Ready` | Reserves its call ordinal, returns `Invalid_Writer_Grammar`, enters `Failed`, and makes no destination call. |
+| Hot grammar call in `Active` | Success remains `Active`; grammar/further failure aborts once and enters `Failed`; abnormal escape exposes `Interrupted`. |
 | `Finish_Document` in `Active` | Balanced root and successful commit: `Completed`; validation/commit failure aborts once and enters `Failed`. |
+| Grammar or `Finish_Document` in `Interrupted` | Nonmutating `Invalid_State`; no ordinal, output, or destination effect; retain the interruption primary. |
 | `Abort_Document` in `Ready` | `Aborted`, no destination call. |
 | `Abort_Document` in `Active` | Destination abort exactly once, then `Aborted`; abort failure is primary if none existed. |
+| `Abort_Document` in `Interrupted` | Destination abort exactly once when owned, clear the marker, enter `Aborted`, and retain the interruption primary; abort failure is secondary with `No_Coordinate` when the staged prefix is unknown. |
 | `Abort_Document` in `Failed` or `Aborted` | Idempotent no-op; retain diagnostics. |
 | `Abort_Document` in `Uninitialized` or `Completed` | Nonmutating no-op. |
 | `Reset` in `Completed`, `Failed`, or `Aborted` | Valid profile: fresh `Ready`; invalid: `Failed` with no applied profile. Never aborts implicitly. |
+| `Reset` in `Interrupted` | Nonmutating `Invalid_State`; explicit abort or owner-scope unwind is required. |
 | `Reset` elsewhere | Nonmutating `Invalid_State`; no destination call. |
 | Other mutating call in uninitialized/terminal state | Nonmutating `Invalid_State`; retained terminal diagnostic wins. |
 
 Initialization, reset, explicit abort, queries, and finalization have no JSON
-call ordinal. After initialize/reset the next admitted ready/active grammar call
-reserves ordinal zero before effects; each later admitted grammar call reserves
-the next value. Calls rejected solely because the writer is uninitialized or
-terminal do not reserve an ordinal. When the next ordinal equals
+call ordinal. `Begin_Document`, every hot grammar call, and `Finish_Document`
+each reserve an ordinal when admitted by lifecycle state. `Begin_Document` and
+`Finish_Document` reserve inside their narrow guarded boundary and do not use
+the hot marker. After initialize/reset the first admitted call reserves ordinal
+zero before destination effects; each later admitted call reserves the next
+value. Calls rejected solely because the writer is uninitialized or terminal
+do not reserve an ordinal. When the next ordinal equals
 `Byte_Offset'Last`, the call is denied before effects with `Offset_Exhausted` at
 that last representable coordinate; an active transaction aborts once. Thus
 successful admitted calls use ordinals zero through `Byte_Offset'Last - 1`.
@@ -464,7 +480,9 @@ Destination diagnostics map as follows:
 - failed `Write`: `Destination_Failed` at the old staged offset;
 - failed `Commit`: `Commit_Failed` at the next staged offset, followed by abort;
 - failed `Abort`: `Abort_Failed` at the next staged offset, secondary when a
-  primary failure already exists;
+  primary failure already exists, except after an interrupted write with an
+  unknown staged prefix, where it is secondary with `No_Coordinate` and offset
+  zero;
 - depth or writer grammar denial: `JSON_Call_Ordinal` of the admitted call;
 - malformed name/string/number input: aggregate `Writer_Token_Byte`;
 - token or staged offset exhaustion: the first denied effect, reported as

@@ -123,23 +123,18 @@ depth blames the opener; name storage blames that name's opening quote.
 
 ## Writer transaction
 
-The writer binds a caller destination and explicit depth capacity. Destination
-`Begin` starts unpublished staging; `Commit` is the only publication point;
-`Abort` always ends the unpublished transaction. Failed commit never claims
-publication. Explicit abort and limited-controlled finalization ensure one
-cleanup attempt; cleanup failure is secondary to an existing JSON failure.
+The normative ownership, interruption, lifecycle, destination, and diagnostic
+contract is [the fast transactional writer architecture](architecture/fast-transactional-writer.md).
+The writer binds a caller destination and explicit depth capacity. Destination `Begin` starts
+unpublished staging; `Commit` is the only publication point; `Abort` ends an unpublished
+transaction. Failed commit never claims publication.
 
-Every admitted mutating writer call is one abort-deferred operation covering
-its finite validation and scan, destination calls, and adjacent writer and
-ownership transitions. If abnormal transfer is pending, an abort-deferred
-cleanup finalizer ends an owned unpublished transaction exactly once and seals
-the writer terminal before unwinding. This deliberately favors transaction
-integrity over cancellation latency: the hot per-octet loop has no task-abort
-check or dispatch, but cancellation waits for the finite call and its
-caller-supplied destination work to return. Every destination formal is
-synchronous, nonraising, and must return; a destination that blocks
-indefinitely can therefore delay task abort indefinitely. The writer invents
-no timeout, helper task, preemption, or scheduling policy.
+Hot grammar and fragment calls use an atomic in-call marker rather than whole-call abort
+deferral. An abnormal transfer can leave the writer `Interrupted`; the owner must then abort the
+document or unwind before any other use. Narrow controlled transfer guards protect begin, commit,
+explicit abort, reset, and finalization ownership transitions. A boundary formal that violates its
+nonraising generic contract is saved and re-raised after the guard completes; it is never converted
+to an ordinary writer result.
 
 Destination writes are bulk and prefix-reporting. Capacity exhaustion accepts
 the longest prefix, locating failure at the first unaccepted staged byte while
@@ -148,11 +143,11 @@ The writer batches maximal safe ASCII/UTF-8 spans, retains at most one scalar's
 carry across fragments, escapes only as required by ordinary compact policy,
 and validates exact number fragments with the parser DFA.
 
-Writer grammar mirrors parser events but uses JSON-level calls only. It knows no
-Ada field, optional, variant, alias, schema, or Type IR projection. Writer input
-offsets count aggregate token octets; staged offsets count candidate output;
-grammar/depth failures use public call ordinals. Every failure aborts an owned
-transaction once and preserves the primary diagnostic.
+Writer grammar mirrors parser events but uses JSON-level calls only. It knows no Ada field,
+optional, variant, alias, schema, OCI model, or Type IR projection. Writer input offsets count
+aggregate token octets; staged offsets count candidate output; grammar/depth failures use public
+call ordinals. Every ordinary failure aborts an owned transaction once and preserves the primary
+diagnostic.
 
 ## Numbers
 
