@@ -24,7 +24,10 @@ symbols=$(nm "$executable")
 printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}yyjson_read_opts$' >/dev/null
 printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}yyjson_write_opts$' >/dev/null
 printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}flyology_bench_yyjson_doc_free$' >/dev/null
-printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}free$' >/dev/null
+# ELF linkers may retain a symbol-version suffix such as @GLIBC_2.2.5 on the
+# undefined ISO C free import.  Mach-O instead prefixes the symbol with `_`.
+printf '%s\n' "$symbols" \
+    | grep -E '[[:space:]]_?free(@[^[:space:]]+)?$' >/dev/null
 
 if printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}flyology_bench_yyjson_read' >/dev/null; then
     printf 'yyjson read is hidden behind a shim instead of imported directly\n' >&2
