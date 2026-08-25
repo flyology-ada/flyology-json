@@ -207,14 +207,14 @@ private package Flyology_JSON.Parser_Core is
 
    function Buffered_Decoded_Kind (Item : Buffered_Event) return Decoded_Fragment_Kind;
 
-   function Buffered_Decoded_Source (Item : Buffered_Event) return Source_Range
-   with Pre => Buffered_Decoded_Kind (Item) /= No_Decoded_Fragment;
+   --  Eligible only when Buffered_Decoded_Kind is not No_Decoded_Fragment.
+   function Buffered_Decoded_Source (Item : Buffered_Event) return Source_Range;
 
-   function Buffered_Decoded_Scalar (Item : Buffered_Event) return Inline_Scalar
-   with Pre => Buffered_Decoded_Kind (Item) = Decoded_Inline_Scalar;
+   --  Eligible only when Buffered_Decoded_Kind is Decoded_Inline_Scalar.
+   function Buffered_Decoded_Scalar (Item : Buffered_Event) return Inline_Scalar;
 
-   function Buffered_Boolean_Data (Item : Buffered_Event) return Boolean
-   with Pre => Buffered_Kind (Item) = Boolean_Value;
+   --  Eligible only when Buffered_Kind is Boolean_Value.
+   function Buffered_Boolean_Data (Item : Buffered_Event) return Boolean;
 
    pragma Inline_Always (Buffered_Kind);
    pragma Inline_Always (Buffered_Source);
