@@ -44,6 +44,9 @@ for track in $tracks
 do
     (
         cd "$benchmarks"
+        FLYOLOGY_JSON_BENCH_TUNING=$track \
+        FLYOLOGY_JSON_BENCH_NATIVE_SWITCH=$native_switch \
+          alr build --release
         FLYOLOGY_JSON_BENCH_TRACK=$track \
         FLYOLOGY_JSON_BENCH_NATIVE_CPU_FLAG=$native_cpu_flag \
           alr exec -- gprbuild -f -p -P competitors/yyjson/yyjson_adapter_tests.gpr
