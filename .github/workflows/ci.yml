@@ -38,7 +38,11 @@ jobs:
       - name: Test parser
         run: |
           if ! alr test; then
-            cat alire/alr_test_local.log
+            if test -f alire/alr_test_local.log; then
+              cat alire/alr_test_local.log
+            else
+              echo "Alire test log was not created" >&2
+            fi
             exit 1
           fi
 

@@ -23,6 +23,10 @@ alr exec -- gprbuild -f -p -j0 -P tests/flyology_json_public_foundation_tests.gp
 alr exec -- gprbuild -f -p -j0 -P tests/flyology_json_public_parsing_tests.gpr
 "$project_root/tests/bin/flyology_json-public_parsing_tests"
 
+#  Materialize Alire's host-local generated project configuration before the
+#  external consumer imports the crate's public GPR project.  Clean source
+#  archives intentionally do not contain config/.
+alr build
 alr exec -- gprbuild -f -p -j0 -P tests/flyology_json_external_consumer_smoke.gpr
 "$project_root/tests/bin/flyology_json_external_consumer_smoke"
 
