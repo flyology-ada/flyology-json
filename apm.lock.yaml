@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-08-24T09:47:18.450544+00:00'
+generated_at: '2026-08-25T18:18:47.284300+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: _local/repository
@@ -12,6 +12,16 @@ dependencies:
     .claude/rules/project.md: sha256:cd11011d6782ad022a38f4de8252fb4db77a4a464e29206e1ee33791ab386fd9
   source: local
   local_path: ./agent-packages/repository
+- repo_url: _local/website
+  name: flyology-json-website-instructions
+  version: 0.1.0
+  package_type: apm_package
+  deployed_files:
+  - .claude/rules/website.md
+  deployed_file_hashes:
+    .claude/rules/website.md: sha256:86b8805a51f24d25743c04757afe60ac7eb612765a82a34ae73f431de1296e9b
+  source: local
+  local_path: ./agent-packages/website
 - repo_url: flyology-ada/agents
   name: flyology-ada-library-profile
   host: github.com
@@ -504,6 +514,15 @@ deployments:
   - flyology-ada/agents/packages/instructions/review-cycle
   active_owner: flyology-ada/agents/packages/instructions/review-cycle
   content_hash: sha256:a69a07a7046aec9488a921f890fb1fb3ef2031ceaa67a7c40980157dfaa7ddbb
+- kind: project-relative
+  target: claude
+  value: .claude/rules/website.md
+  runtime: null
+  scope: project
+  owners:
+  - ./agent-packages/website
+  active_owner: ./agent-packages/website
+  content_hash: sha256:86b8805a51f24d25743c04757afe60ac7eb612765a82a34ae73f431de1296e9b
 - kind: project-relative
   target: claude
   value: .claude/skills/ada-api-contract-review

@@ -1,0 +1,27 @@
+# Flyology JSON
+
+> Experimental Ada-first incremental JSON parser and transactional streaming writer.
+
+Flyology JSON 0.1.0-dev is not yet released in the Flyology Alire index. The bounded core performs no heap allocation. Callers supply input, event storage, duplicate-name storage, token storage, and writer destination staging.
+
+## Documentation
+
+- [Overview](https://json.flyology.org/): project boundary and design summary
+- [Guide](https://json.flyology.org/guide/): task-oriented entry points
+- [Getting started](https://json.flyology.org/guide/getting-started/): build and run the maintained examples
+- [Incremental parsing](https://json.flyology.org/guide/parsing/): Step, Drain, events, raw ranges, and lifecycle
+- [Transactional writing](https://json.flyology.org/guide/writing/): destination contract, grammar calls, and publication
+- [Tokens and numbers](https://json.flyology.org/guide/tokens-and-numbers/): bounded collection and checked signed or unsigned integer conversion
+- [Profiles and errors](https://json.flyology.org/guide/profiles-and-errors/): explicit acceptance policy and coordinates
+- [Architecture](https://json.flyology.org/architecture/): ownership and transaction boundaries
+- [Support](https://json.flyology.org/support/): current evidence and limitations
+- [API reference](https://json.flyology.org/api/): generated GNATdoc reference
+
+## Current boundary
+
+- Parser events are provisional until Document_Complete.
+- Exact number lexemes remain octets; checked signed and unsigned integer conversion is separate.
+- Reject_Duplicates compares decoded names without Unicode normalization. Preserve_Unchecked emits every name and does not select a winner.
+- Ordinary_Compact writer output is deterministic for the same call sequence, but it is not canonical JSON.
+- Binary64, decimal, accounting, canonical output, a DOM, and Type IR adapters are future work.
+- Flyology Wire does not depend on this crate.

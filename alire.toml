@@ -6,7 +6,7 @@ authors = ["Yurii Rashkovskii"]
 maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
 maintainers-logins = ["yrashk"]
 licenses = "MIT OR Apache-2.0"
-website = "https://github.com/flyology-ada/flyology-json"
+website = "https://json.flyology.org"
 tags = ["ada", "json", "streaming", "parser", "writer"]
 
 [[depends-on]]

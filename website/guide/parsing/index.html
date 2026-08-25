@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Use Flyology JSON Step and Drain across arbitrary chunks with raw ranges and explicit duplicate policy.">
+  <title>Incremental parsing · Flyology JSON</title>
+  <link rel="canonical" href="https://json.flyology.org/guide/parsing/">
+  <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../assets/styles/site.css"><link rel="stylesheet" href="../../assets/styles/json.css">
+  <script src="../../assets/scripts/ada-highlight.js"></script><script src="../../assets/scripts/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><nav class="site-nav" aria-label="Primary navigation">
+    <a class="brand" href="../../"><img src="../../assets/brand/flyology-mark-transparent.svg" alt=""><span>Flyology JSON</span></a>
+    <ul class="nav-links" data-nav-links><li><a href="../../">Overview</a></li><li><details class="nav-dropdown" data-nav-dropdown><summary>Guide <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3 3 3.5-3"/></svg></summary><ul class="nav-dropdown-menu"><li><a href="../">Guide overview</a></li><li><a href="../getting-started/">Getting started</a></li><li><a href="./" aria-current="page">Parsing</a></li><li><a href="../writing/">Writing</a></li><li><a href="../tokens-and-numbers/">Tokens and numbers</a></li><li><a href="../profiles-and-errors/">Profiles and errors</a></li></ul></details></li><li><a href="../../architecture/">Architecture</a></li><li><a href="../../support/">Support</a></li><li><a href="../../api/">API</a></li><li><a href="https://github.com/flyology-ada/flyology-json">GitHub</a></li></ul>
+    <div class="nav-tools"><button class="icon-button" type="button" data-theme-toggle><span class="visually-hidden" data-theme-label>Change theme</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg></button><button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h2M4 17h16"/></svg></button></div>
+  </nav></header>
+  <main id="main">
+    <section class="guide-hero page-shell"><span class="eyebrow">Guide · Parsing</span><h1>Incremental parsing</h1><p>The parser accepts any chunk schedule. It retains lexical and structural state, but it never retains a reference to the caller's input array.</p></section>
+    <div class="guide-layout page-shell">
+      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#first-parser">Parse one value</a></li><li><a href="#choose-shape">Choose a static duplicate policy</a></li><li><a href="#configure-storage">Configure storage</a></li><li><a href="#drive">Drive the parser</a></li><li><a href="#events">Read events</a></li><li><a href="#ranges">Resolve raw ranges</a></li><li><a href="#complete">Accept or abort</a></li></ol></aside>
+      <article class="prose">
+        <section id="first-parser">
+          <h2>Parse one complete value</h2>
+          <p>Flyology JSON has no default profile or capacity. This complete strict scalar example sets each value explicitly, initializes the parser, and checks complete-document acceptance.</p>
+          <pre><code class="language-ada" data-example-source="examples/landing_samples.adb" data-example-region="quick-start-parser">   declare
+      Quick_Profile : constant Profiles.Parser_Profile :=
+        (Syntax        =&gt; (Family =&gt; Profiles.RFC_8259, Version =&gt; 1),
+         Unicode       =&gt; (Family =&gt; Profiles.Unicode_Scalars, Version =&gt; 1),
+         Compatibility =&gt; (Family =&gt; Profiles.No_Extensions, Version =&gt; 1),
+         BOM           =&gt; Profiles.Reject_BOM,
+         Duplicates    =&gt; Profiles.Reject_Duplicates,
+         Top_Level     =&gt; Profiles.Accept_Any_Value);
+      Quick_Parser : Parsing.Parser
+        (Maximum_Depth       =&gt; 0,
+         Name_Octet_Capacity =&gt; 0,
+         Name_Capacity       =&gt; 0);
+      Input : constant Ada.Streams.Stream_Element_Array :=
+        [Character'Pos ('n'), Character'Pos ('u'), Character'Pos ('l'), Character'Pos ('l')];
+      Quick_Events     : Parsing.Event_Array (1 .. 4);
+      Quick_Result     : Parsing.Drain_Result;
+      Quick_Diagnostic : Errors.Diagnostic;
+   begin
+      Parsing.Initialize (Quick_Parser, Quick_Profile, Quick_Diagnostic);
+      if Quick_Diagnostic.Code /= Errors.No_Error then
+         raise Program_Error with "parser initialization failed";
+      end if;
+
+      Parsing.Drain
+        (Self         =&gt; Quick_Parser,
+         Input        =&gt; Input,
+         End_Of_Input =&gt; True,
+         Events       =&gt; Quick_Events,
+         Result       =&gt; Quick_Result);
+      if Quick_Result.Stop /= Parsing.Drain_Document_Complete then
+         raise Program_Error with "JSON document was not accepted";
+      end if;
+   end;
+</code></pre>
+          <p>Run the complete examples with <code>./scripts/test-examples.sh</code>. The maintained <code>streaming_parser.adb</code> source contains the complete arbitrary-chunk loop.</p>
+        </section>
+
+        <section id="choose-shape">
+          <h2>Choose a static duplicate policy</h2>
+          <p>Instantiate <a data-api="Flyology_JSON.Parsing"><code>Flyology_JSON.Parsing</code></a> with one explicit duplicate policy. The generic has no default.</p>
+          <p><a data-api="Flyology_JSON.Profiles.Reject_Duplicates"><code>Reject_Duplicates</code></a> compares decoded UTF-8 names without normalization. It uses caller-backed name storage and a bounded crit-bit index. Detection occurs when the later name ends, and the diagnostic blames its opening quote.</p>
+          <p><a data-api="Flyology_JSON.Profiles.Preserve_Unchecked"><code>Preserve_Unchecked</code></a> emits every member in source order. It stores no duplicate-name state and does not choose a first or last value.</p>
+          <div class="callout callout-teal"><div class="callout-symbol">!</div><div class="callout-body"><p class="callout-lede">Duplicate JSON names and application aliases are different checks.</p><p>An application adapter still detects two different names that map to one application field.</p></div></div>
+        </section>
+
+        <section id="configure-storage">
+          <h2>Configure physical storage</h2>
+          <p>A <a data-api="Flyology_JSON.Parsing.Parser"><code>Parser</code></a> takes three discriminants. They are capacities, not compatibility policy, and the library supplies no defaults.</p>
+          <table><thead><tr><th>Capacity</th><th>Exact unit</th></tr></thead><tbody>
+            <tr><td><code>Maximum_Depth</code></td><td>Simultaneously open objects and arrays. A root container is depth one.</td></tr>
+            <tr><td><code>Name_Octet_Capacity</code></td><td>Decoded UTF-8 octets retained across all open strict objects plus the active candidate.</td></tr>
+            <tr><td><code>Name_Capacity</code></td><td>Strict duplicate-index leaves and internal nodes retained across open objects.</td></tr>
+          </tbody></table>
+          <p>Preserve mode ignores both name capacities, so an application can set them to zero. A scalar root needs depth zero.</p>
+        </section>
+
+        <section id="drive">
+          <h2>Drive one event or a batch</h2>
+          <p><a data-api="Flyology_JSON.Parsing.Step"><code>Step</code></a> returns one event, a request for input, complete-document acceptance, or a failure. <code>Drain</code> uses the same engine and fills an arbitrary-bound caller event array.</p>
+          <div class="sequence" aria-label="Parser call sequence"><div><strong>1. Initialize</strong><span>Freeze an explicit profile before byte zero.</span></div><div><strong>2. Supply input</strong><span>Pass a chunk and its final-input state.</span></div><div><strong>3. Consume</strong><span>Advance by the returned count from <code>Input'First</code>.</span></div><div><strong>4. Repeat</strong><span>Keep final input true after the parser latches it.</span></div></div>
+          <p><a data-api="Flyology_JSON.Parsing.Step_Outcome.Need_Input"><code>Need_Input</code></a> consumes the complete supplied chunk. A nonnull <a data-api="Flyology_JSON.Parsing.Drain_Stop.Output_Full"><code>Output_Full</code></a> result fills the complete event array. A null event array is a nonmutating capacity stop.</p>
+          <p>When a call admits <code>End_Of_Input = True</code>, later calls for that document must keep it true. Retraction fails without consuming input.</p>
+        </section>
+
+        <section id="events">
+          <h2>Read the closed event grammar</h2>
+          <p>The <a data-api="Flyology_JSON.Parsing.Event_Kind"><code>Event_Kind</code></a> sequence is balanced and JSON-specific. Objects and arrays do not report lengths. Names, strings, and numbers use begin, fragment, and end events.</p>
+          <ul>
+            <li>Number fragments preserve exact source octets and have no token-storage length ceiling, subject to coordinate exhaustion.</li>
+            <li>Decoded name and string fragments end at Unicode scalar boundaries.</li>
+            <li>An escape or surrogate pair can produce an inline decoded scalar with complete source provenance.</li>
+            <li>A copied event retains coordinates and inline scalar bytes, but never an input reference.</li>
+          </ul>
+          <p>Null and Boolean events expose the complete raw literal only when that literal fits in the producing input window. A split literal remains valid without such a slice.</p>
+        </section>
+
+        <section id="ranges">
+          <h2>Resolve a raw range in the producing call</h2>
+          <p><a data-api="Flyology_JSON.Parsing.Resolve_Raw_Range"><code>Resolve_Raw_Range</code></a> maps absolute source coordinates into the current input window. It validates coordinate containment only. It cannot authenticate an Ada array's identity or unchanged contents.</p>
+          <p>Use the exact unchanged input actual from the call that produced the event. If a consumer must retain a range, copy it before the producing call returns. Do not attach an event to a later chunk that happens to have the same bounds.</p>
+          <div class="callout"><div class="callout-symbol">0</div><div class="callout-body"><p class="callout-lede">All public offsets are zero-based octet coordinates.</p><p>Consumed, produced, and raw-slice positions are counts from the corresponding array's first bound.</p></div></div>
+        </section>
+
+        <section id="complete">
+          <h2>Accept only after document completion</h2>
+          <p>Every event is a provisional observation. The parser accepts the complete document only when a call returns <a data-api="Flyology_JSON.Parsing.Document_Complete"><code>Document_Complete</code></a> after <code>Document_End</code>.</p>
+          <p>A consumer can commit its private candidate at that gate. On malformed input or resource failure, the consumer aborts its candidate and then resets or discards the parser.</p>
+          <p><a data-api="Flyology_JSON.Parsing.Abort_Document"><code>Abort_Document</code></a> ends a clean active operation without raising. A retained primary failure remains primary. <a data-api="Flyology_JSON.Parsing.Reset"><code>Reset</code></a> starts a new operation at byte zero only from a terminal state and revalidates the complete profile.</p>
+        </section>
+        <div class="next-links"><a href="../writing/"><span>Next</span>Write a complete document transaction</a></div>
+      </article>
+    </div>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><span>Events are provisional; complete-document acceptance is the commit gate.</span><div class="footer-links"><a href="../writing/">Writing</a><a href="../tokens-and-numbers/">Tokens</a><a href="../../api/">API</a></div></div></footer>
+</body>
+</html>

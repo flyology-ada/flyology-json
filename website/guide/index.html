@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Task-oriented guide to Flyology JSON parsing, writing, profiles, token collection, and diagnostics.">
+  <title>Guide · Flyology JSON</title>
+  <link rel="canonical" href="https://json.flyology.org/guide/">
+  <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/styles/site.css"><link rel="stylesheet" href="../assets/styles/json.css">
+  <script src="../assets/scripts/ada-highlight.js"></script><script src="../assets/scripts/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><nav class="site-nav" aria-label="Primary navigation">
+    <a class="brand" href="../"><img src="../assets/brand/flyology-mark-transparent.svg" alt=""><span>Flyology JSON</span></a>
+    <ul class="nav-links" data-nav-links><li><a href="../">Overview</a></li><li><details class="nav-dropdown" data-nav-dropdown><summary>Guide <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3 3 3.5-3"/></svg></summary><ul class="nav-dropdown-menu"><li><a href="./" aria-current="page">Guide overview</a></li><li><a href="getting-started/">Getting started</a></li><li><a href="parsing/">Parsing</a></li><li><a href="writing/">Writing</a></li><li><a href="tokens-and-numbers/">Tokens and numbers</a></li><li><a href="profiles-and-errors/">Profiles and errors</a></li></ul></details></li><li><a href="../architecture/">Architecture</a></li><li><a href="../support/">Support</a></li><li><a href="../api/">API</a></li><li><a href="https://github.com/flyology-ada/flyology-json">GitHub</a></li></ul>
+    <div class="nav-tools"><button class="icon-button" type="button" data-theme-toggle><span class="visually-hidden" data-theme-label>Change theme</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg></button><button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h2M4 17h16"/></svg></button></div>
+  </nav></header>
+  <main id="main">
+    <section class="guide-hero page-shell"><span class="eyebrow">Guide</span><h1>Choose a parsing or writing task.</h1><p>Start with the parser or writer boundary that your application controls. Each guide keeps storage, profiles, publication, and failure behavior explicit.</p></section>
+    <section class="json-section page-shell">
+      <div class="guide-grid">
+        <article class="guide-card"><h3>1. Get started</h3><p>Build the crate, construct every profile field, and parse a complete value through the public surface.</p><p><a href="getting-started/">Set up the first parser →</a></p></article>
+        <article class="guide-card"><h3>2. Parse chunks</h3><p>Use <a data-api="Flyology_JSON.Parsing"><code>Flyology_JSON.Parsing</code></a> with arbitrary input boundaries, provisional events, and exact source ranges.</p><p><a href="parsing/">Control the parser →</a></p></article>
+        <article class="guide-card"><h3>3. Write a document</h3><p>Instantiate <a data-api="Flyology_JSON.Writing"><code>Flyology_JSON.Writing</code></a> over a destination that stages a complete transaction.</p><p><a href="writing/">Build the writer boundary →</a></p></article>
+        <article class="guide-card"><h3>4. Retain selected tokens</h3><p>Copy selected fragments with <a data-api="Flyology_JSON.Tokens"><code>Flyology_JSON.Tokens</code></a>, then convert complete integer lexemes.</p><p><a href="tokens-and-numbers/">Collect and convert →</a></p></article>
+        <article class="guide-card"><h3>5. Select policy explicitly</h3><p>Build <a data-api="Flyology_JSON.Profiles.Parser_Profile"><code>Parser_Profile</code></a> and writer profiles without a public default.</p><p><a href="profiles-and-errors/">Choose profiles and read errors →</a></p></article>
+        <article class="guide-card"><h3>6. Check the boundary</h3><p>Review implemented support, tested toolchains, known omissions, and the pre-release dependency gate.</p><p><a href="../support/">Check current support →</a></p></article>
+      </div>
+    </section>
+    <section class="json-section page-shell">
+      <div class="json-section-heading"><div><span class="eyebrow">Reading path</span><h2>Choose by the value you need.</h2></div><p>The core has no DOM. A consumer can handle each event immediately, copy selected strings into bounded storage, or build its own unpublished candidate until the document completes.</p></div>
+      <div class="boundary-grid">
+        <article class="boundary-card"><b>OBSERVE</b><h3>Read and discard</h3><p>Use <a data-api="Flyology_JSON.Parsing.Drain"><code>Drain</code></a> to inspect a large stream with bounded parser and event storage.</p></article>
+        <article class="boundary-card"><b>SELECT</b><h3>Retain a few values</h3><p>Collect only the names, strings, or numbers that the application needs.</p></article>
+        <article class="boundary-card"><b>BUILD</b><h3>Commit after acceptance</h3><p>Keep a private candidate provisional until the parser returns complete-document acceptance.</p></article>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><span>The caller owns storage and the candidate transaction.</span><div class="footer-links"><a href="parsing/">Parsing</a><a href="writing/">Writing</a><a href="../api/">API</a></div></div></footer>
+</body>
+</html>

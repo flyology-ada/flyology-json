@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Select explicit Flyology JSON profiles and interpret nonraising diagnostics with defined coordinate systems.">
+  <title>Profiles and errors · Flyology JSON</title>
+  <link rel="canonical" href="https://json.flyology.org/guide/profiles-and-errors/">
+  <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../assets/styles/site.css"><link rel="stylesheet" href="../../assets/styles/json.css">
+  <script src="../../assets/scripts/ada-highlight.js"></script><script src="../../assets/scripts/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><nav class="site-nav" aria-label="Primary navigation">
+    <a class="brand" href="../../"><img src="../../assets/brand/flyology-mark-transparent.svg" alt=""><span>Flyology JSON</span></a>
+    <ul class="nav-links" data-nav-links><li><a href="../../">Overview</a></li><li><details class="nav-dropdown" data-nav-dropdown><summary>Guide <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3 3 3.5-3"/></svg></summary><ul class="nav-dropdown-menu"><li><a href="../">Guide overview</a></li><li><a href="../getting-started/">Getting started</a></li><li><a href="../parsing/">Parsing</a></li><li><a href="../writing/">Writing</a></li><li><a href="../tokens-and-numbers/">Tokens and numbers</a></li><li><a href="./" aria-current="page">Profiles and errors</a></li></ul></details></li><li><a href="../../architecture/">Architecture</a></li><li><a href="../../support/">Support</a></li><li><a href="../../api/">API</a></li><li><a href="https://github.com/flyology-ada/flyology-json">GitHub</a></li></ul>
+    <div class="nav-tools"><button class="icon-button" type="button" data-theme-toggle><span class="visually-hidden" data-theme-label>Change theme</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg></button><button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h2M4 17h16"/></svg></button></div>
+  </nav></header>
+  <main id="main">
+    <section class="guide-hero page-shell"><span class="eyebrow">Guide · Profiles and errors</span><h1>Make acceptance policy visible.</h1><p>One explicit profile is frozen before byte zero or destination staging. Failures return diagnostics with defined coordinate systems.</p></section>
+    <div class="guide-layout page-shell">
+      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#profile">Construct a profile</a></li><li><a href="#strict">Know strict behavior</a></li><li><a href="#duplicates">Choose duplicate handling</a></li><li><a href="#output">Choose output policy</a></li><li><a href="#diagnostic">Read a diagnostic</a></li><li><a href="#resources">Separate resources</a></li></ol></aside>
+      <article class="prose">
+        <section id="profile">
+          <h2>Construct every profile field</h2>
+          <p><a data-api="Flyology_JSON.Profiles.Parser_Profile"><code>Parser_Profile</code></a> versions syntax, Unicode, and compatibility independently. It also selects BOM, duplicate-name, and top-level policies. The package provides no default or factory.</p>
+          <p>An application can validate a constructed profile before it creates a parser. Parser initialization also validates the profile before it consumes input.</p>
+        </section>
+        <section id="strict">
+          <h2>Know the current strict behavior</h2>
+          <p>The implemented family combination follows RFC 8259 syntax and validates Unicode scalar values. It rejects:</p>
+          <ul><li>a UTF-8 BOM and malformed UTF-8;</li><li>unpaired surrogates and raw control characters;</li><li>comments and trailing commas;</li><li>nonstandard or nonfinite number spellings.</li></ul>
+          <p>The top-level policy accepts any JSON value or requires an object. Neither choice is implicit.</p>
+        </section>
+        <section id="duplicates">
+          <h2>Choose duplicate handling at instantiation</h2>
+          <p><a data-api="Flyology_JSON.Profiles.Reject_Duplicates"><code>Reject_Duplicates</code></a> compares complete decoded names by exact Unicode scalar sequence, without normalization. The parser reports the later name's opening quote after it detects equality at name completion.</p>
+          <p><a data-api="Flyology_JSON.Profiles.Preserve_Unchecked"><code>Preserve_Unchecked</code></a> exposes every member in source order. It does not validate uniqueness or select a winner.</p>
+        </section>
+        <section id="output">
+          <h2>Select ordinary output explicitly</h2>
+          <p><a data-api="Flyology_JSON.Profiles.Writer_Profile"><code>Writer_Profile</code></a> versions syntax, Unicode, and formatting. The current <a data-api="Flyology_JSON.Profiles.Output_Policy.Ordinary_Compact"><code>Ordinary_Compact</code></a> policy is deterministic for the same valid call sequence.</p>
+          <p>Ordinary output is not canonical JSON. A future canonical profile requires a separate contract and review.</p>
+        </section>
+        <section id="diagnostic">
+          <h2>Read the primary diagnostic first</h2>
+          <p><a data-api="Flyology_JSON.Errors.Diagnostic"><code>Diagnostic</code></a> contains a primary error code, coordinate kind, and zero-based offset when that coordinate kind is eligible. Cleanup failure can add a secondary diagnostic without replacing the primary failure.</p>
+          <table><thead><tr><th>Coordinate</th><th>Meaning</th></tr></thead><tbody><tr><td><a data-api="Flyology_JSON.Errors.Coordinate_Kind.No_Coordinate"><code>No_Coordinate</code></a></td><td>The error has no eligible offset.</td></tr><tr><td><a data-api="Flyology_JSON.Errors.Coordinate_Kind.Source_Byte"><code>Source_Byte</code></a></td><td>Absolute input octet from the start of the JSON document.</td></tr><tr><td><a data-api="Flyology_JSON.Errors.Coordinate_Kind.Writer_Token_Byte"><code>Writer_Token_Byte</code></a></td><td>Octet in the active name, string, or number input.</td></tr><tr><td><a data-api="Flyology_JSON.Errors.Coordinate_Kind.Staged_Output_Byte"><code>Staged_Output_Byte</code></a></td><td>Octet in the complete staged output stream.</td></tr><tr><td><a data-api="Flyology_JSON.Errors.Coordinate_Kind.JSON_Call_Ordinal"><code>JSON_Call_Ordinal</code></a></td><td>Admitted writer grammar call, counted from zero.</td></tr></tbody></table>
+          <p>Malformed input, resource exhaustion, destination failure, and commit failure return statuses. They are not normal exception paths.</p>
+        </section>
+        <section id="resources">
+          <h2>Keep physical limits separate from policy</h2>
+          <p>Depth and duplicate-name capacities are caller-selected physical bounds. They do not change which JSON spellings a profile accepts when enough storage exists.</p>
+          <p>The trusted parser and writer contain no accounting ledger or budget branch. A separately reviewed accounted surface remains future work for untrusted consumers that need aggregate work charging.</p>
+          <div class="callout callout-teal"><div class="callout-symbol">!</div><div class="callout-body"><p class="callout-lede">A resource failure reports its defined source, writer-token, staged-output, or call-ordinal coordinate.</p><p>Choose capacities from application limits, test exact-fit and one-over boundaries, and never describe an example capacity as a library default.</p></div></div>
+        </section>
+        <div class="next-links"><a href="../../architecture/"><span>Next</span>Review ownership and publication boundaries</a></div>
+      </article>
+    </div>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><span>Profiles select acceptance; capacities bound storage.</span><div class="footer-links"><a href="../parsing/">Parsing</a><a href="../writing/">Writing</a><a href="../../api/">API</a></div></div></footer>
+</body>
+</html>

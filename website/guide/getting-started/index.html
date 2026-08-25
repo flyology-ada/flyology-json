@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Build Flyology JSON and drive a first strict incremental parser with explicit storage and profile choices.">
+  <title>Getting started · Flyology JSON</title>
+  <link rel="canonical" href="https://json.flyology.org/guide/getting-started/">
+  <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../assets/styles/site.css"><link rel="stylesheet" href="../../assets/styles/json.css">
+  <script src="../../assets/scripts/ada-highlight.js"></script><script src="../../assets/scripts/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><nav class="site-nav" aria-label="Primary navigation">
+    <a class="brand" href="../../"><img src="../../assets/brand/flyology-mark-transparent.svg" alt=""><span>Flyology JSON</span></a>
+    <ul class="nav-links" data-nav-links><li><a href="../../">Overview</a></li><li><details class="nav-dropdown" data-nav-dropdown><summary>Guide <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3 3 3.5-3"/></svg></summary><ul class="nav-dropdown-menu"><li><a href="../">Guide overview</a></li><li><a href="./" aria-current="page">Getting started</a></li><li><a href="../parsing/">Parsing</a></li><li><a href="../writing/">Writing</a></li><li><a href="../tokens-and-numbers/">Tokens and numbers</a></li><li><a href="../profiles-and-errors/">Profiles and errors</a></li></ul></details></li><li><a href="../../architecture/">Architecture</a></li><li><a href="../../support/">Support</a></li><li><a href="../../api/">API</a></li><li><a href="https://github.com/flyology-ada/flyology-json">GitHub</a></li></ul>
+    <div class="nav-tools"><button class="icon-button" type="button" data-theme-toggle><span class="visually-hidden" data-theme-label>Change theme</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg></button><button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h2M4 17h16"/></svg></button></div>
+  </nav></header>
+  <main id="main">
+    <section class="guide-hero page-shell"><span class="eyebrow">Guide · Getting started</span><h1>Parse a document.</h1><p>The first program uses strict JSON, strict decoded-name duplicate rejection, caller-selected capacities, and a caller event buffer.</p></section>
+    <div class="guide-layout page-shell">
+      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#parse">Parse one value</a></li><li><a href="#run">Build and run</a></li><li><a href="#continue">Continue with chunks</a></li><li><a href="#status">Check release status</a></li></ol></aside>
+      <article class="prose">
+        <section id="parse">
+          <h2>Parse one complete value</h2>
+          <p>The example instantiates <a data-api="Flyology_JSON.Parsing"><code>Flyology_JSON.Parsing</code></a> with strict duplicate rejection. It constructs a complete <a data-api="Flyology_JSON.Profiles.Parser_Profile"><code>Parser_Profile</code></a> before byte zero. The zero capacities are explicit application choices for this scalar input, not library defaults.</p>
+          <pre><code class="language-ada" data-example-source="examples/landing_samples.adb" data-example-region="quick-start-parser">   declare
+      Quick_Profile : constant Profiles.Parser_Profile :=
+        (Syntax        =&gt; (Family =&gt; Profiles.RFC_8259, Version =&gt; 1),
+         Unicode       =&gt; (Family =&gt; Profiles.Unicode_Scalars, Version =&gt; 1),
+         Compatibility =&gt; (Family =&gt; Profiles.No_Extensions, Version =&gt; 1),
+         BOM           =&gt; Profiles.Reject_BOM,
+         Duplicates    =&gt; Profiles.Reject_Duplicates,
+         Top_Level     =&gt; Profiles.Accept_Any_Value);
+      Quick_Parser : Parsing.Parser
+        (Maximum_Depth       =&gt; 0,
+         Name_Octet_Capacity =&gt; 0,
+         Name_Capacity       =&gt; 0);
+      Input : constant Ada.Streams.Stream_Element_Array :=
+        [Character'Pos ('n'), Character'Pos ('u'), Character'Pos ('l'), Character'Pos ('l')];
+      Quick_Events     : Parsing.Event_Array (1 .. 4);
+      Quick_Result     : Parsing.Drain_Result;
+      Quick_Diagnostic : Errors.Diagnostic;
+   begin
+      Parsing.Initialize (Quick_Parser, Quick_Profile, Quick_Diagnostic);
+      if Quick_Diagnostic.Code /= Errors.No_Error then
+         raise Program_Error with "parser initialization failed";
+      end if;
+
+      Parsing.Drain
+        (Self         =&gt; Quick_Parser,
+         Input        =&gt; Input,
+         End_Of_Input =&gt; True,
+         Events       =&gt; Quick_Events,
+         Result       =&gt; Quick_Result);
+      if Quick_Result.Stop /= Parsing.Drain_Document_Complete then
+         raise Program_Error with "JSON document was not accepted";
+      end if;
+   end;
+</code></pre>
+        </section>
+        <section id="run">
+          <h2>Build and run the maintained example</h2>
+          <p>Run <code>./scripts/test-examples.sh</code> from the repository root. The script builds the example project through Alire and executes both parser and writer programs.</p>
+        </section>
+        <section id="continue">
+          <h2>Continue with arbitrary chunks</h2>
+          <p>The maintained <code>streaming_parser.adb</code> example advances only by returned consumed and produced counts. It accepts a deliberately awkward string boundary.</p>
+          <p>Continue with the <a href="../parsing/">parsing guide</a> before retaining raw ranges or building an application candidate.</p>
+        </section>
+        <section id="status">
+          <h2>Check the current release</h2>
+          <p>Version 0.1.0-dev is undergoing final publication. See <a href="../../support/">Support</a> for the current indexed-release status.</p>
+        </section>
+        <div class="next-links"><a href="../parsing/"><span>Next</span>Parse arbitrary input chunks</a></div>
+      </article>
+    </div>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><span>Every profile and capacity is explicit.</span><div class="footer-links"><a href="../parsing/">Parsing</a><a href="../writing/">Writing</a><a href="../../api/">API</a></div></div></footer>
+</body>
+</html>

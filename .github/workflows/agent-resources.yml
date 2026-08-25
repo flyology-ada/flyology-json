@@ -1,0 +1,29 @@
+name: Agent resources
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install Python 3.13
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - name: Install APM 0.28.0
+        run: pip install apm-cli==0.28.0
+      - name: Reproduce agent resources
+        run: |
+          apm install --frozen
+          apm compile --target codex
+          apm audit --ci
+          git diff --exit-code -- AGENTS.md website/AGENTS.md apm.lock.yaml

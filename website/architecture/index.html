@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Streaming, storage, ownership, and publication boundaries in Flyology JSON.">
+  <title>Architecture · Flyology JSON</title>
+  <link rel="canonical" href="https://json.flyology.org/architecture/">
+  <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/styles/site.css">
+  <link rel="stylesheet" href="../assets/styles/json.css">
+  <script src="../assets/scripts/ada-highlight.js"></script>
+  <script src="../assets/scripts/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <nav class="site-nav" aria-label="Primary navigation">
+      <a class="brand" href="../" aria-label="Flyology JSON home">
+        <img src="../assets/brand/flyology-mark-transparent.svg" alt="">
+        <span>Flyology JSON</span>
+      </a>
+      <ul class="nav-links" data-nav-links>
+        <li><a href="../">Overview</a></li>
+        <li><details class="nav-dropdown" data-nav-dropdown><summary>Guide <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3 3 3.5-3"/></svg></summary><ul class="nav-dropdown-menu"><li><a href="../guide/">Guide overview</a></li><li><a href="../guide/getting-started/">Getting started</a></li><li><a href="../guide/parsing/">Parsing</a></li><li><a href="../guide/writing/">Writing</a></li><li><a href="../guide/tokens-and-numbers/">Tokens and numbers</a></li><li><a href="../guide/profiles-and-errors/">Profiles and errors</a></li></ul></details></li>
+        <li><a href="./" aria-current="page">Architecture</a></li>
+        <li><a href="../support/">Support</a></li>
+        <li><a href="../api/">API</a></li>
+        <li><a href="https://github.com/flyology-ada/flyology-json">GitHub</a></li>
+      </ul>
+      <div class="nav-tools">
+        <button class="icon-button" type="button" data-theme-toggle>
+          <span class="visually-hidden" data-theme-label>Change theme</span>
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/>
+          </svg>
+        </button>
+        <button class="menu-button" type="button" data-menu-toggle aria-expanded="false"
+                aria-label="Toggle navigation">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M4 7h16M4 12h2M4 17h16"/>
+          </svg>
+        </button>
+      </div>
+    </nav>
+  </header>
+  <main id="main" class="page-shell">
+    <header class="doc-hero">
+      <div>
+        <ol class="breadcrumb"><li><a href="../">Overview</a></li><li>Architecture</li></ol>
+        <h1>Define streaming ownership</h1>
+      </div>
+      <p class="doc-hero-copy">The caller controls input, storage, and publication. Flyology JSON owns syntax state,
+        validation, duplicate detection, and writer transaction state.</p>
+    </header>
+    <div class="docs-layout">
+      <aside class="toc" aria-label="On this page">
+        <span class="toc-title">On this page</span>
+        <ul>
+          <li><a href="#configuration">Freeze configuration</a></li>
+          <li><a href="#parser">Parse incrementally</a></li>
+          <li><a href="#events">Borrow event data</a></li>
+          <li><a href="#duplicates">Bound duplicate detection</a></li>
+          <li><a href="#writer">Publish transactions</a></li>
+          <li><a href="#tokens">Collect and convert</a></li>
+          <li><a href="#boundaries">Keep layers separate</a></li>
+        </ul>
+      </aside>
+      <article class="prose">
+        <section id="configuration">
+          <h2>Freeze configuration before byte zero</h2>
+          <p>A caller constructs each <a data-api="Flyology_JSON.Profiles.Parser_Profile"><code>Parser_Profile</code></a>
+            field explicitly. The API supplies no default profile, depth, name storage, or duplicate policy.</p>
+          <p>The parser validates and freezes the profile during initialization. An unsupported or incompatible profile
+            fails before input consumption. The writer applies the same rule before it begins a destination transaction.</p>
+          <p>The implemented strict profile combination accepts any JSON value at the top level. It rejects a BOM, malformed UTF-8,
+            unpaired surrogates, comments, trailing commas, nonstandard numbers, nonfinite values, and raw control
+            characters. A caller can instead require an object root.</p>
+        </section>
+
+        <section id="parser">
+          <h2>Parse one chunk without retaining it</h2>
+          <p>The <a data-api="Flyology_JSON.Parsing"><code>Flyology_JSON.Parsing</code></a> generic receives its duplicate
+            policy as a static generic argument. Each parser instance has caller-selected depth and name capacities.</p>
+          <p><a data-api="Flyology_JSON.Parsing.Step"><code>Step</code></a> consumes a count from an arbitrary-bound
+            <code>Stream_Element_Array</code>. It returns one event, a need-input result, complete-document acceptance,
+            or a failure. <a data-api="Flyology_JSON.Parsing.Drain"><code>Drain</code></a> runs the same semantic engine and
+            fills a caller-owned event array.</p>
+          <p>Chunks can end inside UTF-8 sequences, escapes, surrogate pairs, numbers, literals, and structural input.
+            Parser state carries only the bounded information needed to resume. It never retains the input array.</p>
+          <div class="semantic-callout">
+            <strong>An event is not document acceptance.</strong>
+            <p>All events are provisional. Only the
+              <a data-api="Flyology_JSON.Parsing.Document_Complete"><code>Document_Complete</code></a> outcome accepts the
+              complete document. A consumer commits its own candidate after that outcome and discards it after failure
+              or abort.</p>
+          </div>
+        </section>
+
+        <section id="events">
+          <h2>Keep lexical and decoded data distinct</h2>
+          <p>An <a data-api="Flyology_JSON.Parsing.Event"><code>Event</code></a> value has a private representation and carries absolute source coordinates.
+            Number fragments expose the exact input octets. The parser does not normalize or convert a number lexeme.</p>
+          <p>A raw range borrows from the exact unchanged input of the producing call. The range stores counts, not an
+            access value. <a data-api="Flyology_JSON.Parsing.Resolve_Raw_Range"><code>Resolve_Raw_Range</code></a> checks
+            coordinate containment in a caller-described window. It cannot authenticate the identity or contents of an
+            Ada array.</p>
+          <p>Name and string fragments also provide decoded UTF-8. An unescaped run can refer to the producing input.
+            An escape or surrogate pair can produce one complete inline Unicode scalar. The caller must copy any raw
+            range that must outlive the producing call. An event copy retains its inline scalar.</p>
+        </section>
+
+        <section id="duplicates">
+          <h2>Select duplicate handling statically</h2>
+          <p><a data-api="Flyology_JSON.Profiles.Reject_Duplicates"><code>Reject_Duplicates</code></a> compares decoded
+            member names as exact Unicode scalar sequences without normalization. A bounded crit-bit index avoids a scan
+            over all prior names and has no collision-only fallback.</p>
+          <p><a data-api="Flyology_JSON.Profiles.Preserve_Unchecked"><code>Preserve_Unchecked</code></a> emits provisional
+            events for every member in source order. It performs no duplicate storage, comparison, or selection. It does not mean first
+            wins or last wins.</p>
+          <p>Strict duplicate storage is caller-selected through parser discriminants. <code>Name_Octet_Capacity</code>
+            bounds retained decoded name octets. <code>Name_Capacity</code> bounds crit-bit leaves and internal nodes. The public contract defines exact-fit,
+            release, denial, and diagnostic behavior.</p>
+        </section>
+
+        <section id="writer">
+          <h2>Publish only a complete document</h2>
+          <p>The <a data-api="Flyology_JSON.Writing"><code>Flyology_JSON.Writing</code></a> generic binds one destination.
+            The destination provides synchronous begin, write, commit, and abort operations for one whole-document
+            transaction.</p>
+          <p><a data-api="Flyology_JSON.Writing.Begin_Document"><code>Begin_Document</code></a> starts unpublished staging.
+            Semantic calls then emit one balanced JSON value. Name, string, and number fragments can have arbitrary Ada
+            bounds. A number retains the exact caller-supplied spelling after validation.</p>
+          <p><a data-api="Flyology_JSON.Writing.Finish_Document"><code>Finish_Document</code></a> is the only commit request.
+            Commit success is the only publication point. Destination exhaustion, validation failure, interruption, or
+            commit failure does not publish a partial document.</p>
+          <p>The <a data-api="Flyology_JSON.Profiles.Ordinary_Compact"><code>Ordinary_Compact</code></a> output policy adds
+            no whitespace or BOM. It preserves caller member order and exact validated number lexemes. It is deterministic
+            for the same call sequence, but it is not canonical JSON.</p>
+        </section>
+
+        <section id="tokens">
+          <h2>Collect complete tokens in a separate layer</h2>
+          <p><a data-api="Flyology_JSON.Tokens"><code>Flyology_JSON.Tokens</code></a> copies selected decoded names,
+            strings, or exact number lexemes into caller storage. Completion publishes the collected prefix atomically.
+            Capacity denial publishes no token.</p>
+          <p>The generic <a data-api="Flyology_JSON.Numbers.Signed_Integers"><code>Signed_Integers</code></a> and
+            <a data-api="Flyology_JSON.Numbers.Unsigned_Integers"><code>Unsigned_Integers</code></a> packages parse a
+            complete strict integer lexeme with checked range results. They also render exact base-ten integers into
+            caller storage. Parsing a JSON token and converting its value remain separate operations.</p>
+        </section>
+
+        <section id="boundaries">
+          <h2>Keep integration policy outside the core</h2>
+          <p>The current core performs no heap allocation. Caller storage, destination staging, and any consumer candidate
+            remain outside that claim. The core has no dependency on a Flyology runtime, operating-system API,
+            Type IR, or Wire.</p>
+          <p>The current public surface does not provide a DOM, an allocating convenience layer, or an accounting API.
+            Binary64 and decimal conversion, canonical output, and consumer adapters are also future work. These features
+            require separate design, evidence, and review.</p>
+          <div class="next-links">
+            <a href="../guide/parsing/"><span>Parsing</span>Drive the event stream</a>
+            <a href="../guide/writing/"><span>Writing</span>Use a transactional destination</a>
+          </div>
+        </section>
+      </article>
+    </div>
+  </main>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>Experimental 0.1.0-dev API. Not yet available from the Flyology Alire index.</span>
+      <div class="footer-links">
+        <a href="../guide/">Guide</a>
+        <a href="../support/">Support</a>
+        <a href="../api/">API</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

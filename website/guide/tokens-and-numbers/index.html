@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Collect selected JSON token octets in bounded caller storage and convert complete integer lexemes safely.">
+  <title>Tokens and numbers · Flyology JSON</title>
+  <link rel="canonical" href="https://json.flyology.org/guide/tokens-and-numbers/">
+  <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../assets/styles/site.css"><link rel="stylesheet" href="../../assets/styles/json.css">
+  <script src="../../assets/scripts/ada-highlight.js"></script><script src="../../assets/scripts/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><nav class="site-nav" aria-label="Primary navigation">
+    <a class="brand" href="../../"><img src="../../assets/brand/flyology-mark-transparent.svg" alt=""><span>Flyology JSON</span></a>
+    <ul class="nav-links" data-nav-links><li><a href="../../">Overview</a></li><li><details class="nav-dropdown" data-nav-dropdown><summary>Guide <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3 3 3.5-3"/></svg></summary><ul class="nav-dropdown-menu"><li><a href="../">Guide overview</a></li><li><a href="../getting-started/">Getting started</a></li><li><a href="../parsing/">Parsing</a></li><li><a href="../writing/">Writing</a></li><li><a href="./" aria-current="page">Tokens and numbers</a></li><li><a href="../profiles-and-errors/">Profiles and errors</a></li></ul></details></li><li><a href="../../architecture/">Architecture</a></li><li><a href="../../support/">Support</a></li><li><a href="../../api/">API</a></li><li><a href="https://github.com/flyology-ada/flyology-json">GitHub</a></li></ul>
+    <div class="nav-tools"><button class="icon-button" type="button" data-theme-toggle><span class="visually-hidden" data-theme-label>Change theme</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg></button><button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h2M4 17h16"/></svg></button></div>
+  </nav></header>
+  <main id="main">
+    <section class="guide-hero page-shell"><span class="eyebrow">Guide · Tokens and numbers</span><h1>Retain only the token you need.</h1><p>The parser streams fragments. The bounded collector copies selected octets and publishes a length only after completion.</p></section>
+    <div class="guide-layout page-shell">
+      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#collector">Bind storage</a></li><li><a href="#collect">Collect a token</a></li><li><a href="#failure">Keep failure unpublished</a></li><li><a href="#integers">Convert integers</a></li><li><a href="#render">Render integers</a></li><li><a href="#future">Current boundary</a></li></ol></aside>
+      <article class="prose">
+        <section id="collector">
+          <h2>Bind caller storage</h2>
+          <p><a data-api="Flyology_JSON.Tokens.Collector"><code>Tokens.Collector</code></a> binds a caller-owned <code>Stream_Element_Array</code>. The array can have arbitrary bounds and must outlive the collector.</p>
+          <p>The collector retains no fragment input and performs no allocation. Its capacity is exactly the bound array length.</p>
+        </section>
+        <section id="collect">
+          <h2>Collect one selected token</h2>
+          <p><a data-api="Flyology_JSON.Tokens.Begin_Token"><code>Begin_Token</code></a> chooses a decoded name, decoded string, or exact number. Before calling <a data-api="Flyology_JSON.Tokens.Append"><code>Append</code></a>, ensure that the fragment input does not overlap collector storage. Then append each selected parser fragment.</p>
+          <p><a data-api="Flyology_JSON.Tokens.Complete_Token"><code>Complete_Token</code></a> publishes the staged prefix length atomically. Until then, the caller must not inspect or mutate the storage.</p>
+          <div class="sequence" aria-label="Token collection sequence"><div><strong>1. Begin</strong><span>Select the token kind.</span></div><div><strong>2. Append</strong><span>Copy each complete fragment.</span></div><div><strong>3. Complete</strong><span>Publish the exact prefix length.</span></div><div><strong>4. Consume</strong><span>Use the prefix or convert it.</span></div></div>
+        </section>
+        <section id="failure">
+          <h2>Keep capacity failure unpublished</h2>
+          <p><code>Append</code> copies all fragment octets or none. If the fragment does not fit, the collector enters <code>Failed</code> and publishes no completed length. Failed storage remains unpublished and must not be read or modified until abort or reset.</p>
+          <p><a data-api="Flyology_JSON.Tokens.Abort_Token"><code>Abort_Token</code></a> and <a data-api="Flyology_JSON.Tokens.Reset"><code>Reset</code></a> are idempotent. Each returns the collector to <code>Empty</code>. Retained storage octets then become unspecified.</p>
+        </section>
+        <section id="integers">
+          <h2>Convert only a complete integer lexeme</h2>
+          <p>Instantiate <a data-api="Flyology_JSON.Numbers.Signed_Integers"><code>Numbers.Signed_Integers</code></a> with a signed integer type, or instantiate <a data-api="Flyology_JSON.Numbers.Unsigned_Integers"><code>Numbers.Unsigned_Integers</code></a> with a modular type.</p>
+          <p>The signed <a data-api="Flyology_JSON.Numbers.Signed_Integers.Parse"><code>Parse</code></a> and unsigned <a data-api="Flyology_JSON.Numbers.Unsigned_Integers.Parse"><code>Parse</code></a> operations accept one complete strict JSON integer spelling. A fraction or exponent is invalid syntax. Range checks occur before arithmetic overflow or modular wrap.</p>
+          <table><thead><tr><th>Conversion</th><th>Special result</th></tr></thead><tbody><tr><td>Signed</td><td><code>-0</code> converts to zero.</td></tr><tr><td>Unsigned</td><td>Every negative spelling, including <code>-0</code>, returns <code>Negative_Value</code>.</td></tr></tbody></table>
+          <p>The result value is eligible only when the status is <code>Converted</code>. No failure publishes a numeric value.</p>
+        </section>
+        <section id="render">
+          <h2>Render deterministic integer text</h2>
+          <p>The signed <a data-api="Flyology_JSON.Numbers.Signed_Integers.Render"><code>Render</code></a> and unsigned <a data-api="Flyology_JSON.Numbers.Unsigned_Integers.Render"><code>Render</code></a> operations emit exact base ten without a plus sign, leading zero, fraction, or exponent. They accept an arbitrary-bound output array.</p>
+          <p>If the array is too small, the operation reports zero produced octets and leaves the complete output unchanged.</p>
+        </section>
+        <section id="future">
+          <h2>Keep future conversions separate</h2>
+          <p>The current public implementation provides checked signed and unsigned integer conversion and rendering. Binary64, decimal, and application-specific conversions are future work.</p>
+          <p>The parser always preserves number lexeme octets exactly. Conversion is a separate application decision and never changes the parser event stream.</p>
+        </section>
+        <div class="next-links"><a href="../profiles-and-errors/"><span>Next</span>Select profiles and read diagnostics</a></div>
+      </article>
+    </div>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><span>Exact lexemes first; checked conversion second.</span><div class="footer-links"><a href="../parsing/">Parsing</a><a href="../profiles-and-errors/">Profiles</a><a href="../../api/">API</a></div></div></footer>
+</body>
+</html>

@@ -1,0 +1,3 @@
+# Alire generates this build-configuration unit. It is not part of the crate's
+# source API and must not appear in the published reference.
+Flyology_Json_Config

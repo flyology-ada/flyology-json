@@ -13,6 +13,7 @@
 /benchmarks/writer_obj/
 build/
 docs/api/
+docs/gnatdoc/
 
 # Generated agent packages and caches
 .agents/

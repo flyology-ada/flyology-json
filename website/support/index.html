@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Current release, compiler, test, corpus, and feature evidence for Flyology JSON.">
+  <title>Support · Flyology JSON</title>
+  <link rel="canonical" href="https://json.flyology.org/support/">
+  <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/styles/site.css">
+  <link rel="stylesheet" href="../assets/styles/json.css">
+  <script src="../assets/scripts/ada-highlight.js"></script>
+  <script src="../assets/scripts/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <nav class="site-nav" aria-label="Primary navigation">
+      <a class="brand" href="../" aria-label="Flyology JSON home">
+        <img src="../assets/brand/flyology-mark-transparent.svg" alt="">
+        <span>Flyology JSON</span>
+      </a>
+      <ul class="nav-links" data-nav-links>
+        <li><a href="../">Overview</a></li>
+        <li><details class="nav-dropdown" data-nav-dropdown><summary>Guide <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3 3 3.5-3"/></svg></summary><ul class="nav-dropdown-menu"><li><a href="../guide/">Guide overview</a></li><li><a href="../guide/getting-started/">Getting started</a></li><li><a href="../guide/parsing/">Parsing</a></li><li><a href="../guide/writing/">Writing</a></li><li><a href="../guide/tokens-and-numbers/">Tokens and numbers</a></li><li><a href="../guide/profiles-and-errors/">Profiles and errors</a></li></ul></details></li>
+        <li><a href="../architecture/">Architecture</a></li>
+        <li><a href="./" aria-current="page">Support</a></li>
+        <li><a href="../api/">API</a></li>
+        <li><a href="https://github.com/flyology-ada/flyology-json">GitHub</a></li>
+      </ul>
+      <div class="nav-tools">
+        <button class="icon-button" type="button" data-theme-toggle>
+          <span class="visually-hidden" data-theme-label>Change theme</span>
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/>
+          </svg>
+        </button>
+        <button class="menu-button" type="button" data-menu-toggle aria-expanded="false"
+                aria-label="Toggle navigation">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M4 7h16M4 12h2M4 17h16"/>
+          </svg>
+        </button>
+      </div>
+    </nav>
+  </header>
+  <main id="main" class="page-shell">
+    <header class="doc-hero">
+      <div>
+        <ol class="breadcrumb"><li><a href="../">Overview</a></li><li>Support</li></ol>
+        <h1>Current support and evidence</h1>
+      </div>
+      <p class="doc-hero-copy">Support claims below come from maintained public units, tests, corpora, assembly gates,
+        and continuous integration. A manifest constraint alone is not compatibility evidence.</p>
+    </header>
+    <div class="docs-layout">
+      <aside class="toc" aria-label="On this page">
+        <span class="toc-title">On this page</span>
+        <ul>
+          <li><a href="#release">Release status</a></li>
+          <li><a href="#surface">Current surface</a></li>
+          <li><a href="#toolchains">Toolchains</a></li>
+          <li><a href="#tests">Behavior tests</a></li>
+          <li><a href="#corpora">Corpora and oracles</a></li>
+          <li><a href="#limits">Current limits</a></li>
+        </ul>
+      </aside>
+      <article class="prose">
+        <section id="release">
+          <h2>Do not add a release dependency yet</h2>
+          <div class="semantic-callout">
+            <strong>Version 0.1.0-dev is experimental, not yet released, and not yet indexed.</strong>
+            <p>The Flyology Alire index does not yet provide a reviewed, no-pin release. Downstream crates must wait for
+              the indexed milestone. The API may still change during final review.</p>
+          </div>
+          <p>The repository manifest declares GCC-based GNAT 13 through 16 as its intended compiler range. The executed
+            matrix below is the compatibility evidence.</p>
+        </section>
+
+        <section id="surface">
+          <h2>Use the implemented trusted surface</h2>
+          <table class="support-table">
+            <thead><tr><th>Public unit</th><th>Current capability</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><a data-api="Flyology_JSON.Parsing"><code>Flyology_JSON.Parsing</code></a></td>
+                <td>Incremental <a data-api="Flyology_JSON.Parsing.Step"><code>Step</code></a> and batched
+                  <a data-api="Flyology_JSON.Parsing.Drain"><code>Drain</code></a>, provisional events, exact source
+                  coordinates, exact number fragments, explicit capacities, and static duplicate handling.</td>
+              </tr>
+              <tr>
+                <td><a data-api="Flyology_JSON.Tokens"><code>Flyology_JSON.Tokens</code></a></td>
+                <td>Bounded collection of selected decoded strings, decoded names, or exact number lexemes into caller
+                  storage.</td>
+              </tr>
+              <tr>
+                <td><a data-api="Flyology_JSON.Numbers.Signed_Integers"><code>Signed_Integers</code></a> and
+                  <a data-api="Flyology_JSON.Numbers.Unsigned_Integers"><code>Unsigned_Integers</code></a></td>
+                <td>Checked conversion of complete strict integer lexemes and deterministic base-ten integer rendering.</td>
+              </tr>
+              <tr>
+                <td><a data-api="Flyology_JSON.Writing"><code>Flyology_JSON.Writing</code></a></td>
+                <td>Allocation-free writer core with semantic streaming calls. The caller-defined destination owns
+                  whole-document staging and can choose its own allocation behavior.</td>
+              </tr>
+              <tr>
+                <td><a data-api="Flyology_JSON.Profiles"><code>Flyology_JSON.Profiles</code></a> and
+                  <a data-api="Flyology_JSON.Errors"><code>Flyology_JSON.Errors</code></a></td>
+                <td>Explicit versioned profile records and nonraising diagnostics with zero-based coordinates.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>The parser and writer accept arbitrary-bound <code>Stream_Element_Array</code> values. Physical capacities
+            and profiles are always application choices; the library provides no default capacity or profile.</p>
+        </section>
+
+        <section id="toolchains">
+          <h2>Separate the build matrix from benchmark tooling</h2>
+          <table class="support-table">
+            <thead><tr><th>Evidence lane</th><th>Operating systems</th><th>Toolchain</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Repository test action</td>
+                <td>macOS 15 and Ubuntu 24.04</td>
+                <td>GNAT 13.2.2, 14.2.1, 15.3.1, and 16.1.0; GPRbuild 26.0.1</td>
+              </tr>
+              <tr>
+                <td>Benchmark adapters</td>
+                <td>macOS 15 and Ubuntu 24.04</td>
+                <td>GNAT 16.1.0, GPRbuild 26.0.1, Rust 1.97.1, Node 24.19.0, and npm 11.17.0</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>The benchmark jobs have portable and native tracks. The benchmark jobs build maintained adapters for
+            independent implementations. Their different parser and writer contracts make the results optimization evidence, not a
+            claim of semantic equivalence.</p>
+        </section>
+
+        <section id="tests">
+          <h2>Exercise lifecycle and bounded failure</h2>
+          <p>The maintained test action builds and runs:</p>
+          <ul><li>parser, UTF-8, number grammar, duplicate-index, and Unicode escape tests;</li><li>public foundation and parser tests;</li><li>private and public writer tests; and</li><li>an external public-unit consumer compilation.</li></ul>
+          <p>Focused cases cover:</p>
+          <ul><li>arbitrary Ada bounds, empty input, and chunk or fragment schedules;</li><li>exact depth and storage limits, reset, and abort;</li><li>destination exhaustion, commit or abort failure, and task interruption; and</li><li>exact offsets and transactional nonpublication.</li></ul>
+          <p>Public-surface assembly gates require parser accessors and the batched path to inline without an indirect hot
+            call. A separate gate requires the writer string-fragment path to inline. It rejects finalization, tasking,
+            and allocation runtime calls in that probe. Installed no-pin consumer assembly evidence remains a release
+            gate.</p>
+        </section>
+
+        <section id="corpora">
+          <h2>Treat corpora as evidence, not authority</h2>
+          <p>The parser lane pins 314 selected JSONTestSuite fixtures and 80 selected JSON Schema Test Suite JSON files.
+            The repository verifies exact fixture sets, licenses, byte digests, and aggregate manifests before execution.</p>
+          <p>All 394 fixtures run as one chunk, as one-byte chunks, and with deterministic randomized schedules. Malformed
+            inputs must retain the monolithic error code and byte offset. The expensive every-single-split campaign has an
+            explicit caller-supplied work ceiling and is not part of routine continuous integration.</p>
+          <p>The writer lane uses four project-owned event tapes and exact hexadecimal golden output. Each token runs whole,
+            one octet at a time, at every single split, and through four deterministic randomized schedules. The public
+            parser reparses the output under varied chunks. Node's built-in JSON parser provides an additional independent
+            acceptance check.</p>
+          <p>Corpus labels and oracle agreement never replace the selected JSON profile or the JSON specification.</p>
+        </section>
+
+        <section id="limits">
+          <h2>Keep future work out of current claims</h2>
+          <ul>
+            <li>The API remains experimental until the reviewed 0.1.0-dev index release.</li>
+            <li>Fresh downstream resolution without a Git or path pin remains a release gate.</li>
+            <li>The trusted package has no accounting or budget surface for untrusted consumer integration.</li>
+            <li>Binary64, decimal, and application-specific number conversions are not current public units.</li>
+            <li>Canonical JSON, a DOM, allocating conveniences, and Type IR, Wire, or OCI adapters are not current
+              library features.</li>
+            <li><a data-api="Flyology_JSON.Profiles.Ordinary_Compact"><code>Ordinary_Compact</code></a> is deterministic
+              for the same calls, but it is not canonical JSON.</li>
+          </ul>
+          <div class="next-links">
+            <a href="../architecture/"><span>Architecture</span>Review ownership and publication</a>
+            <a href="../guide/"><span>Guide</span>Use the current public units</a>
+          </div>
+        </section>
+      </article>
+    </div>
+  </main>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>Support claims require maintained executed evidence.</span>
+      <div class="footer-links">
+        <a href="../guide/">Guide</a>
+        <a href="../architecture/">Architecture</a>
+        <a href="../api/">API</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

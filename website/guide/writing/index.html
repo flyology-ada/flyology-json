@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Write compact JSON through a caller-owned whole-document transaction with explicit publication.">
+  <title>Transactional writing · Flyology JSON</title>
+  <link rel="canonical" href="https://json.flyology.org/guide/writing/">
+  <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../assets/styles/site.css"><link rel="stylesheet" href="../../assets/styles/json.css">
+  <script src="../../assets/scripts/ada-highlight.js"></script><script src="../../assets/scripts/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><nav class="site-nav" aria-label="Primary navigation">
+    <a class="brand" href="../../"><img src="../../assets/brand/flyology-mark-transparent.svg" alt=""><span>Flyology JSON</span></a>
+    <ul class="nav-links" data-nav-links><li><a href="../../">Overview</a></li><li><details class="nav-dropdown" data-nav-dropdown><summary>Guide <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3 3 3.5-3"/></svg></summary><ul class="nav-dropdown-menu"><li><a href="../">Guide overview</a></li><li><a href="../getting-started/">Getting started</a></li><li><a href="../parsing/">Parsing</a></li><li><a href="./" aria-current="page">Writing</a></li><li><a href="../tokens-and-numbers/">Tokens and numbers</a></li><li><a href="../profiles-and-errors/">Profiles and errors</a></li></ul></details></li><li><a href="../../architecture/">Architecture</a></li><li><a href="../../support/">Support</a></li><li><a href="../../api/">API</a></li><li><a href="https://github.com/flyology-ada/flyology-json">GitHub</a></li></ul>
+    <div class="nav-tools"><button class="icon-button" type="button" data-theme-toggle><span class="visually-hidden" data-theme-label>Change theme</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg></button><button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h2M4 17h16"/></svg></button></div>
+  </nav></header>
+  <main id="main">
+    <section class="guide-hero page-shell"><span class="eyebrow">Guide · Writing</span><h1>Publish the whole document or nothing.</h1><p>The writer validates a JSON call sequence and stages every output octet in a caller-defined destination transaction.</p></section>
+    <div class="guide-layout page-shell">
+      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#destination">Define a destination</a></li><li><a href="#profile">Freeze the profile</a></li><li><a href="#calls">Write one value</a></li><li><a href="#fragments">Supply fragments</a></li><li><a href="#failure">Handle failure</a></li><li><a href="#ordinary">Distinguish ordinary output from canonical JSON</a></li></ol></aside>
+      <article class="prose">
+        <section id="destination">
+          <h2>Define a whole-document destination</h2>
+          <p>Instantiate <a data-api="Flyology_JSON.Writing"><code>Flyology_JSON.Writing</code></a> with four destination operations. <code>Begin</code> starts unpublished staging. <code>Write</code> accepts all bytes, a prefix, or none. <code>Commit</code> is the only publication point. <code>Abort</code> ends an unpublished transaction.</p>
+          <p>The destination outlives the writer and must not retain the array passed to <code>Write</code>. Each formal operation is synchronous, finite, nonreentrant, and nonraising.</p>
+          <div class="transaction-line" aria-label="Writer transaction"><div class="transaction-node">Begin</div><div class="transaction-link"></div><div class="transaction-node">Stage</div><div class="transaction-link"></div><div class="transaction-node publish">Commit</div><div class="transaction-link"></div><div class="transaction-node">Publish</div></div>
+        </section>
+
+        <section id="profile">
+          <h2>Freeze the profile before staging</h2>
+          <p>Construct every field of <a data-api="Flyology_JSON.Profiles.Writer_Profile"><code>Writer_Profile</code></a> explicitly. <a data-api="Flyology_JSON.Writing.Initialize"><code>Initialize</code></a> validates and freezes the profile. It does not start a destination transaction.</p>
+          <p>Bind the writer to its destination and choose <code>Maximum_Depth</code>. The root object or array has depth one. A scalar root needs depth zero.</p>
+        </section>
+
+        <section id="calls">
+          <h2>Write one balanced root value</h2>
+          <p><a data-api="Flyology_JSON.Writing.Begin_Document"><code>Begin_Document</code></a> opens the transaction. JSON calls then describe exactly one balanced root. <a data-api="Flyology_JSON.Writing.Finish_Document"><code>Finish_Document</code></a> validates the end state and requests commit.</p>
+          <pre><code class="language-ada" data-example-source="examples/transactional_writer.adb" data-example-region="writer-calls">   Writing.Initialize (Writer, Profile, Diagnostic);
+   Require_Success (Diagnostic, "Initialize");
+
+   Writing.Begin_Document (Writer, Diagnostic);
+   Require_Success (Diagnostic, "Begin_Document");
+   Writing.Begin_Object (Writer, Diagnostic);
+   Require_Success (Diagnostic, "Begin_Object");
+   Writing.Begin_Name (Writer, Diagnostic);
+   Require_Success (Diagnostic, "Begin_Name");
+   Writing.Put_Name_Fragment (Writer, Name, Diagnostic);
+   Require_Success (Diagnostic, "Put_Name_Fragment");
+   Writing.End_Name (Writer, Diagnostic);
+   Require_Success (Diagnostic, "End_Name");
+   Writing.Begin_String (Writer, Diagnostic);
+   Require_Success (Diagnostic, "Begin_String");
+   Writing.Put_String_Fragment (Writer, Value, Diagnostic);
+   Require_Success (Diagnostic, "Put_String_Fragment");
+   Writing.End_String (Writer, Diagnostic);
+   Require_Success (Diagnostic, "End_String");
+   Writing.End_Object (Writer, Diagnostic);
+   Require_Success (Diagnostic, "End_Object");
+
+   --  The complete candidate is still unpublished at this point.
+   if Target.Published_Length /= 0 then
+      raise Program_Error with "the destination published before commit";
+   end if;
+
+   Writing.Finish_Document (Writer, Diagnostic);
+   Require_Success (Diagnostic, "Finish_Document");
+</code></pre>
+          <p>The maintained example publishes <code>{"message":"Hello, Ada!"}</code> only after the final call succeeds. Run it with <code>./scripts/test-examples.sh</code>.</p>
+        </section>
+
+        <section id="fragments">
+          <h2>Supply decoded text and exact numbers</h2>
+          <p>Name and string fragments contain decoded UTF-8 octets. A caller can split them inside a UTF-8 sequence. The writer retains only the carry needed to validate the next scalar.</p>
+          <p>Number fragments contain an exact JSON number spelling. The writer validates the spelling across fragment boundaries and emits the admitted octets unchanged.</p>
+          <p>All fragment arrays can have arbitrary Ada bounds. Empty fragments are accepted no-ops in an active token.</p>
+        </section>
+
+        <section id="failure">
+          <h2>Abort unpublished work after failure</h2>
+          <p>A grammar, UTF-8, number, depth, destination, or commit failure publishes no document. The writer retains the primary diagnostic. <a data-api="Flyology_JSON.Writing.Abort_Document"><code>Abort_Document</code></a> cleans up an active unpublished transaction and preserves an earlier primary failure.</p>
+          <p>An asynchronous transfer can leave the writer interrupted. The owner must abort the document or leave the writer scope before any other use. If a destination formal violates its nonraising contract, unwind the writer scope immediately.</p>
+        </section>
+
+        <section id="ordinary">
+          <h2>Ordinary compact output is not canonical</h2>
+          <p><a data-api="Flyology_JSON.Profiles.Ordinary_Compact"><code>Ordinary_Compact</code></a> adds no BOM or whitespace. It preserves caller member order and exact validated number lexemes. It leaves solidus and valid non-ASCII text unescaped.</p>
+          <p>The policy uses short standard escapes and uppercase hexadecimal for other escaped controls. It does not sort names, add a final line feed, or claim canonical JSON.</p>
+        </section>
+        <div class="next-links"><a href="../tokens-and-numbers/"><span>Next</span>Collect tokens and convert integers</a></div>
+      </article>
+    </div>
+  </main>
+  <footer class="site-footer"><div class="footer-inner"><span>Commit is the only publication point.</span><div class="footer-links"><a href="../parsing/">Parsing</a><a href="../tokens-and-numbers/">Tokens</a><a href="../../api/">API</a></div></div></footer>
+</body>
+</html>

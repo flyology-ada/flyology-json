@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Flyology JSON provides bounded incremental parsing and transactional streaming writing for Ada. Its core performs no heap allocation.">
+  <meta name="theme-color" content="#f5f2e9">
+  <title>Flyology JSON · Incremental JSON for Ada</title>
+  <link rel="canonical" href="https://json.flyology.org/">
+  <link rel="icon" href="assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/styles/site.css">
+  <link rel="stylesheet" href="assets/styles/json.css">
+  <script src="assets/scripts/ada-highlight.js"></script>
+  <script src="assets/scripts/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <nav class="site-nav" aria-label="Primary navigation">
+      <a class="brand" href="./" aria-label="Flyology JSON home">
+        <img src="assets/brand/flyology-mark-transparent.svg" alt="">
+        <span>Flyology JSON</span>
+      </a>
+      <ul class="nav-links" data-nav-links>
+        <li><a href="./" aria-current="page">Overview</a></li>
+        <li><details class="nav-dropdown" data-nav-dropdown><summary>Guide <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3 3 3.5-3"/></svg></summary><ul class="nav-dropdown-menu"><li><a href="guide/">Guide overview</a></li><li><a href="guide/getting-started/">Getting started</a></li><li><a href="guide/parsing/">Parsing</a></li><li><a href="guide/writing/">Writing</a></li><li><a href="guide/tokens-and-numbers/">Tokens and numbers</a></li><li><a href="guide/profiles-and-errors/">Profiles and errors</a></li></ul></details></li>
+        <li><a href="architecture/">Architecture</a></li>
+        <li><a href="support/">Support</a></li>
+        <li><a href="api/">API</a></li>
+        <li><a href="https://github.com/flyology-ada/flyology-json">GitHub</a></li>
+      </ul>
+      <div class="nav-tools">
+        <button class="icon-button" type="button" data-theme-toggle>
+          <span class="visually-hidden" data-theme-label>Change theme</span>
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+        </button>
+        <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h2M4 17h16"/></svg>
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="json-hero page-shell">
+      <div>
+        <span class="eyebrow">Ada 2022 · experimental</span>
+        <h1>Streaming JSON for Ada.</h1>
+        <p class="hero-lede">Flyology JSON parses arbitrary UTF-8 chunks into provisional events. Its writer stages a complete document before publication. The bounded core performs no heap allocation and preserves number lexemes exactly.</p>
+        <div class="actions">
+          <a class="button button-primary" href="guide/getting-started/">Parser guide</a>
+          <a class="button button-secondary" href="guide/writing/">Writer guide</a>
+        </div>
+        <p class="release-note">Version 0.1.0-dev. The public surface is under review and is not yet available from the Flyology Alire index.</p>
+      </div>
+
+      <div class="json-hero-visual">
+        <figure class="stream-console">
+          <figcaption><span>arbitrary input chunks</span><strong>exact source offsets</strong></figcaption>
+          <div class="chunk-track" aria-label="JSON split across four arbitrary chunks">
+            <span class="chunk">{"name":"fl</span>
+            <span class="chunk chunk-split">yolo\u</span>
+            <span class="chunk chunk-utf8">0067y","n":1e</span>
+            <span class="chunk">+12}</span>
+          </div>
+          <div class="stream-arrow"><span>validated across chunks · no retained input reference</span></div>
+          <div class="event-track" aria-label="Selected parser events">
+            <span class="event-chip">Document_Begin</span>
+            <span class="event-chip">Object_Begin</span>
+            <span class="event-chip">Name_Fragment</span>
+            <span class="event-chip">String_Fragment</span>
+            <span class="event-chip">Number_Fragment</span>
+            <span class="event-chip">Object_End</span>
+          </div>
+          <div class="acceptance-gate"><span>events are provisional</span><strong>Document_Complete → accept</strong></div>
+        </figure>
+        <div class="json-code-pair" aria-label="Public Ada API examples">
+          <div class="code-window json-code-window">
+            <div class="code-titlebar"><div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div><span>landing_samples.adb · parser</span></div>
+            <pre><code class="language-ada" data-example-source="examples/landing_samples.adb" data-example-region="landing-parser">   Parsing.Drain
+     (Self         =&gt; Parser,
+      Input        =&gt; Chunk,
+      End_Of_Input =&gt; True,
+      Events       =&gt; Events,
+      Result       =&gt; Result);
+</code></pre>
+          </div>
+          <div class="code-window json-code-window json-code-window-number">
+            <div class="code-titlebar"><div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div><span>landing_samples.adb · integer</span></div>
+            <pre><code class="language-ada" data-example-source="examples/landing_samples.adb" data-example-region="landing-number">   Unsigned_64_JSON.Parse
+     (Lexeme =&gt; Number,
+      Result =&gt; Number_Result);
+</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="json-status" aria-label="Current design boundary">
+      <div class="json-status-inner page-shell">
+        <div class="json-status-item"><strong>Input</strong><span>Incremental UTF-8 octets with arbitrary array bounds.</span></div>
+        <div class="json-status-item"><strong>Storage</strong><span>Caller-selected depth, names, tokens, and destinations.</span></div>
+        <div class="json-status-item"><strong>Failures</strong><span>Nonraising statuses and defined diagnostic coordinates.</span></div>
+        <div class="json-status-item"><strong>Dependencies</strong><span>No Flyology runtime, Type IR, Wire, or C.</span></div>
+      </div>
+    </section>
+
+    <section class="json-section page-shell">
+      <div class="json-section-heading">
+        <div><span class="eyebrow">Writer</span><h2>Transactional publication</h2></div>
+        <p>The writer sends ordinary compact JSON to a destination transaction. Only a successful commit publishes the document. Destination exhaustion, invalid grammar, invalid UTF-8, and invalid number spelling leave no partial document published.</p>
+      </div>
+      <div class="transaction-line" aria-label="Writer transaction lifecycle">
+        <div class="transaction-node">Begin</div><div class="transaction-link"></div>
+        <div class="transaction-node">Write spans</div><div class="transaction-link"></div>
+        <div class="transaction-node publish">Commit</div><div class="transaction-link"></div>
+        <div class="transaction-node failure">Abort on failure</div>
+      </div>
+    </section>
+
+    <section class="json-section page-shell">
+      <div class="json-section-heading">
+        <div><span class="eyebrow">Guide</span><h2>Choose a public layer</h2></div>
+        <p>Flyology JSON owns JSON syntax and octets. Your application owns input buffers, destination staging, selected token storage, and the candidate it commits after document acceptance.</p>
+      </div>
+      <div class="guide-grid">
+        <article class="guide-card"><h3>Incremental parsing</h3><p>Feed chunks, consume balanced events, and resolve raw ranges safely.</p><p><a href="guide/parsing/">Read the parsing guide →</a></p></article>
+        <article class="guide-card"><h3>Transactional writing</h3><p>Implement a bounded destination and publish only complete JSON.</p><p><a href="guide/writing/">Read the writing guide →</a></p></article>
+        <article class="guide-card"><h3>Tokens and integers</h3><p>Collect selected fragments into caller storage and run checked integer conversion.</p><p><a href="guide/tokens-and-numbers/">Read the token guide →</a></p></article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>Incremental JSON parsing and transactional writing for Ada.</span>
+      <div class="footer-links"><a href="guide/">Guide</a><a href="architecture/">Architecture</a><a href="support/">Support</a><a href="api/">API</a></div>
+    </div>
+  </footer>
+</body>
+</html>
