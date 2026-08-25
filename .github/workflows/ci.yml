@@ -49,14 +49,6 @@ jobs:
     steps:
       - name: Check out sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Install Node 24.19.0
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
-        with:
-          node-version: 24.19.0
-          cache: npm
-          cache-dependency-path: benchmarks/comparison/package-lock.json
-      - name: Install npm 11.17.0
-        run: npm install --global npm@11.17.0
       - name: Install Rust 1.97.1
         run: |
           rustup toolchain install 1.97.1 --profile minimal
@@ -77,5 +69,19 @@ jobs:
           alr index --reset-community
           alr index --add=git+https://github.com/flyology-ada/alire-index.git \
             --name=flyology --before=community
+      # setup-alire currently installs Node 20 for its own implementation and
+      # places it on PATH. Restore the reviewed benchmark runtime afterwards.
+      - name: Install Node 24.19.0
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: benchmarks/comparison/package-lock.json
+      - name: Install npm 11.17.0
+        run: npm install --global npm@11.17.0
+      - name: Verify benchmark JavaScript toolchain
+        run: |
+          test "$(node --version)" = v24.19.0
+          test "$(npm --version)" = 11.17.0
       - name: Build and test benchmark competitors
         run: ./scripts/test-benchmark-competitors.sh "${{ matrix.track }}"
