@@ -1,4 +1,3 @@
-with Flyology_JSON.Budgets;
 with Interfaces;
 
 --  Nonraising JSON diagnostics with explicit coordinate systems.
@@ -25,12 +24,10 @@ is
       Raw_Control_Character,
       Duplicate_Name,
       Top_Level_Kind_Rejected,
-      Budget_Denied,
       Depth_Exhausted,
       Name_Storage_Exhausted,
       Duplicate_Index_Exhausted,
       Offset_Exhausted,
-      Counter_Exhausted,
       Destination_Exhausted,
       Destination_Failed,
       Commit_Failed,
@@ -41,23 +38,15 @@ is
       Source_Byte,
       Writer_Token_Byte,
       Staged_Output_Byte,
-      JSON_Call_Ordinal,
-      JSON_Event_Ordinal);
-
-   type Destination_Outcome is (Stage_Accepted, Stage_Capacity_Denied, Stage_Error);
+      JSON_Call_Ordinal);
 
    type Diagnostic is record
-      Code                     : Error_Code;
-      Has_Coordinate           : Boolean;
-      Coordinate               : Coordinate_Kind;
-      Offset                   : Byte_Offset;
-      Has_Denied_Dimension     : Boolean;
-      Denied_Dimension         : Budgets.Charge_Dimension;
-      Has_Secondary            : Boolean;
-      Secondary                : Error_Code;
-      Secondary_Has_Coordinate : Boolean;
-      Secondary_Coordinate     : Coordinate_Kind;
-      Secondary_Offset         : Byte_Offset;
+      Code                 : Error_Code;
+      Coordinate           : Coordinate_Kind;
+      Offset               : Byte_Offset;
+      Secondary            : Error_Code;
+      Secondary_Coordinate : Coordinate_Kind;
+      Secondary_Offset     : Byte_Offset;
    end record;
 
    procedure Clear (Item : out Diagnostic);

@@ -1,37 +1,55 @@
---  Independently versioned JSON syntax, interoperability, and output policy.
+--  Independently versioned JSON syntax, Unicode, compatibility, duplicate,
+--  root, and output identities for the trusted surface.
 
 package Flyology_JSON.Profiles
   with Pure
 is
-   type Syntax_Profile_Id is (RFC8259_Syntax_V1);
-   type Unicode_Profile_Id is (Unicode_Scalars_V1);
-   type Compatibility_Profile_Id is (No_Extensions_V1);
-   type Writer_Profile_Id is (Ordinary_Compact_V1);
+   subtype Profile_Version is Positive;
 
-   type BOM_Profile_Id is (Reject_BOM_V1);
-   type Duplicate_Name_Profile_Id is (Preserve_Unchecked_V1, Detect_And_Report_V1, Reject_Duplicate_V1);
-   type Top_Level_Profile_Id is (Accept_Any_Value_V1, Require_Object_V1);
+   type Syntax_Family is (RFC_8259);
+   type Unicode_Family is (Unicode_Scalars);
+   type Compatibility_Family is (No_Extensions);
+   type BOM_Policy is (Reject_BOM);
+   type Duplicate_Policy is (Reject_Duplicates, Preserve_Unchecked);
+   type Top_Level_Policy is (Accept_Any_Value, Require_Object);
+   type Output_Policy is (Ordinary_Compact);
+
+   type Versioned_Syntax is record
+      Family  : Syntax_Family;
+      Version : Profile_Version;
+   end record;
+
+   type Versioned_Unicode is record
+      Family  : Unicode_Family;
+      Version : Profile_Version;
+   end record;
+
+   type Versioned_Compatibility is record
+      Family  : Compatibility_Family;
+      Version : Profile_Version;
+   end record;
+
+   type Versioned_Output is record
+      Policy  : Output_Policy;
+      Version : Profile_Version;
+   end record;
 
    type Parser_Profile is record
-      Syntax        : Syntax_Profile_Id;
-      Unicode       : Unicode_Profile_Id;
-      Compatibility : Compatibility_Profile_Id;
-      BOM           : BOM_Profile_Id;
-      Duplicates    : Duplicate_Name_Profile_Id;
-      Top_Level     : Top_Level_Profile_Id;
+      Syntax        : Versioned_Syntax;
+      Unicode       : Versioned_Unicode;
+      Compatibility : Versioned_Compatibility;
+      BOM           : BOM_Policy;
+      Duplicates    : Duplicate_Policy;
+      Top_Level     : Top_Level_Policy;
    end record;
 
    type Writer_Profile is record
-      Syntax     : Syntax_Profile_Id;
-      Unicode    : Unicode_Profile_Id;
-      Formatting : Writer_Profile_Id;
+      Syntax     : Versioned_Syntax;
+      Unicode    : Versioned_Unicode;
+      Formatting : Versioned_Output;
    end record;
 
    type Profile_Status is (Profile_Supported, Profile_Unsupported, Profile_Incompatible);
-
-   function Interoperable_RFC8259_V1 return Parser_Profile;
-
-   function Compact_UTF8_V1 return Writer_Profile;
 
    function Validate (Profile : Parser_Profile) return Profile_Status;
 

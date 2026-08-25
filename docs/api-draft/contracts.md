@@ -1,398 +1,377 @@
 # Draft public contracts
 
-This document is normative for the adjacent draft Ada declarations. It will be
-converted into GNATdoc comments when the declarations move into `src/`.
+These contracts govern the compile-checked declarations in this directory.
+They are review artifacts until moved into `src`; they are not installed API.
 
-## Generic formal contracts
+## Operation ownership
 
-Each parser and writer instance has one logical owner. Public mutating calls on
-that instance, its budget, and (for a writer) its destination are serialized;
-concurrent calls or independent target access while active violate the
-contract. Sequential ownership transfer is permitted only when the prior owner
-is no longer executing a call.
+One parser, writer, or token collector has one logical owner. Mutating calls on
+an instance and its bound caller collaborators are serialized. No package owns
+an Ada task, retains a parser input array, calls a consumer visitor, or permits
+reentrant use from a destination or future accounting hook.
 
-The core does not introduce an Ada tasking dependency or an abort-deferred
-region. A caller must defer asynchronous task abort, asynchronous transfer of
-control, and cancellation while a public mutating call, budget hook, destination
-formal, or finalization cleanup is executing. Such interruption is outside the
-contract because it can occur between a destination side effect and its writer
-ownership-state update. The finalization guarantee covers normal scope exit and
-synchronous exception unwinding initiated outside a mutating call; it does not
-claim recovery from asynchronous task abort. JSON operations and conforming
-generic formals are themselves nonraising.
-
-`Charge` executes synchronously on the caller's stack. It must not allocate,
-raise an exception, retain an engine or array reference, call the same parser or
-writer recursively, or mutate JSON state through another alias. `Deny_Charge`
-means the named effect did not occur. An exception violates the generic
-contract; JSON does not convert arbitrary application exceptions into an input
-or resource status.
-
-Every destination operation executes synchronously on the writer caller's
-stack. A destination must not retain `Data` after `Destination_Write` returns.
-The caller must not access `Target` independently while the writer is `Active`.
-
-The destination transaction contract is:
-
-- failed `Destination_Begin` creates no transaction and stages nothing;
-- successful `Destination_Begin` creates one unpublished transaction;
-- `Destination_Write` is all-or-nothing for the supplied array;
-- failed `Destination_Write` leaves the transaction abortable and publishes
-  nothing;
-- successful `Destination_Commit` is the only publication point;
-- failed `Destination_Commit` publishes nothing and leaves the transaction
-  abortable;
-- `Destination_Abort` is nonraising and idempotent, publishes nothing, and ends
-  the transaction even when it reports `Stage_Error` for secondary cleanup;
-- the destination operations must not call the writer recursively.
-
-The writer catches no exception from a destination formal. Raising violates the
-generic contract because Ada cannot guarantee transaction cleanup after an
-arbitrary foreign exception. Explicitly allocating destinations catch their own
-`Storage_Error`, clean up, and return `Stage_Error`.
-
-`Writer` is limited controlled. Its nonraising finalization safety net checks
-`Owns_Transaction`; when true, it advances the nondeniable cleanup/destination
-observations and invokes `Destination_Abort` exactly once. It cannot return a
-diagnostic because the object is leaving scope. A conforming destination ends
-the transaction without publication even if it reports a cleanup error. The
-safety net is a last resort for normal caller exception unwinding or
-abandonment outside a mutating call; callers use explicit `Abort_Document` when
-they need the cleanup result. After finish, explicit abort, or failure cleanup
-clears ownership, finalization is a no-op. The access discriminant requires the
-target to outlive writer finalization.
+The trusted parser and writer contain no budget object, accounting hook,
+accounting branch, or observational counter. Resource accounting is a separate
+opt-in package and capability identity. A nullable budget is not used.
 
 ## Profiles
 
-One successful `Initialize` or `Reset` copies and freezes a complete profile.
-No profile field changes during an operation. `Applied_Profile` returns that
-copy. `Has_Applied_Profile` is false before the first successful initialization
-and after any rejected initialize/reset profile; `Applied_Profile` is then
-ineligible. Unsupported or incompatible profiles fail before input consumption
-or destination begin.
+Every versioned family carries an explicit positive numeric version. Version
+identifiers are values, not `_V1` name suffixes. The initial implementation
+accepts version `1` for each declared versioned family and rejects every other
+value before byte zero or destination begin. Adding behavior under an existing
+family/version is incompatible. Unversioned policy literals are immutable
+flags; changed semantics require a new literal rather than reinterpretation.
 
-Successful initialization/reset clears the retained diagnostic. A successful
-abort with no earlier failure retains that cleared diagnostic; it does not
-invent an error. Consequently `Terminal_Diagnostic` in such an `Aborted` state
-returns `No_Error`, while abort after `Failed` retains the primary failure.
+No profile factory, parameter default, public constant, capacity default, or
+implicit policy is provided. Callers construct every field explicitly.
 
-`Interoperable_RFC8259_V1` returns:
+The initial syntax profile is strict RFC 8259 JSON over UTF-8 Unicode scalar
+values. It rejects a BOM, malformed UTF-8, unpaired surrogate escapes, raw
+control characters, comments, trailing commas, nonstandard number spellings,
+and nonfinite values. Top-level scalars are accepted only with
+`Accept_Any_Value`; `Require_Object` rejects another root kind at that root's
+actual first non-whitespace source octet.
 
-```text
-Syntax         = RFC8259_Syntax_V1
-Unicode        = Unicode_Scalars_V1
-Compatibility  = No_Extensions_V1
-BOM            = Reject_BOM_V1
-Duplicates     = Reject_Duplicate_V1
-Top_Level      = Accept_Any_Value_V1
-```
+`Reject_Duplicates` compares decoded object names by exact Unicode-scalar
+sequence without normalization. `Preserve_Unchecked` exposes every name in
+source order and performs no duplicate storage or comparison. It never selects
+a winner or sets a duplicate flag. Alias collisions remain a Serde concern.
 
-`Compact_UTF8_V1` selects `RFC8259_Syntax_V1`, `Unicode_Scalars_V1`, and
-`Ordinary_Compact_V1`. It does not check, sort, remove, or select duplicate
-names. It preserves every caller name and member in call order.
+The trusted package identity is the no-accounting capability. Accounting does
+not appear in its profile records. A parser instance rejects a profile whose
+duplicate policy differs from its static `Duplicate_Mode`.
 
-`Require_Object_V1` changes only the accepted root kind. It rejects another root
-at that root's first source octet. It does not imply Type IR schema authority.
+`Ordinary_Compact` emits UTF-8 without a BOM or added whitespace, preserves
+caller object-member order and exact validated number lexemes, leaves solidus
+and valid non-ASCII unescaped, uses short standard escapes, and uses uppercase
+hexadecimal for remaining escaped controls. It is not canonical JSON. No key
+sorting, key-order verification, normalized number spelling, or final newline
+is implied.
 
-`No_Extensions_V1` rejects comments, trailing commas, nonstandard and nonfinite
-number spellings, and raw control characters. No extension-accepting profile or
-flag is present in this initial public draft. Each future compatibility profile
-or flag requires separate user authority and P0/P1/P2 review before becoming an
-accepted language. `Reject_BOM_V1` rejects the three-octet UTF-8 signature only
-at document offset zero. The same octets inside a string decode normally to
-U+FEFF; outside a string later in the document they follow ordinary JSON token
-rules and are not classified as a BOM. No BOM-ignoring choice is public.
-`Unicode_Scalars_V1` never replaces malformed UTF-8 or an unpaired surrogate.
+## Event grammar
 
-`Detect_And_Report_V1` accepts every member. Only the later member's `Name_End`
-event has `Is_Duplicate = True`. `Reject_Duplicate_V1` fails at the later name's
-opening quote before returning its `Name_End`; earlier name events remain
-provisional. `Preserve_Unchecked_V1` retains no name history and sets
-`Is_Duplicate = False` because duplication is unknown.
-
-## Event field validity and coverage
-
-Events are ordinary copyable values and contain no access component. Inline
-decoded scalar bytes remain valid in every copy. A `Raw_Slice` is meaningful
-only together with the exact `Input` array supplied to the `Step` that returned
-it. It maps to:
+The closed grammar is:
 
 ```text
-Input (Input'First + Stream_Element_Offset (First_Count)
-       .. Input'First + Stream_Element_Offset (First_Count + Octet_Length) - 1)
+Document_Begin value Document_End
+value = object | array | string | number | Null_Value | Boolean_Value
+object = Object_Begin *(Name_Begin name-pieces Name_End value) Object_End
+array = Array_Begin *value Array_End
+string = String_Begin string-pieces String_End
+number = Number_Begin number-pieces Number_End
 ```
 
-The zero-length case denotes a null range and performs no subtraction. The
-caller may retain the range only if it also retains and identifies that exact
-input array. JSON retains neither.
+Container lengths are unknown. JSON null, Boolean, object, and array events do
+not imply Ada optionals, variants, records, schemas, aliases, or fingerprints.
+Events remain provisional until `Document_Complete`; the consumer owns its
+candidate commit/abort transaction.
 
-`Source` is an absolute range and remains meaningful without the chunk.
-`Source_Start` equals `Source.First` except for a source-free document event,
-where it is the next absolute input offset and `Source.Octet_Length = 0`.
+Every `Name_Fragment`, `String_Fragment`, and `Number_Fragment` has a raw slice
+into the returning call's input. A text fragment with
+`Decoded_Is_Raw_Range` covers complete decoded scalars whose UTF-8 equals that
+raw source range. `Decoded_Inline_Scalar` covers one complete scalar produced by
+an escape or assembled across chunks. `No_Decoded_Fragment` covers only a raw
+split piece that does not yet complete a scalar, or a final provisional piece
+returned before a retained resource failure. Decoded fragments always end at
+scalar boundaries; no decoded payload is eligible for an incomplete piece.
+`Number_Fragment` covers exact source octets without conversion or normalization
+and has no complete-token length ceiling.
 
-Field validity is:
+`Event` is a compact private value. Its size, packing, representation, and ABI
+are not public. `Kind` and `Source` are always eligible. `Boolean_Data` is
+eligible only for `Boolean_Value`. `Decoded_Source` is eligible only when
+`Decoded_Kind` is not `No_Decoded_Fragment`; `Decoded_Scalar` is eligible only
+for `Decoded_Inline_Scalar`.
 
-- structural begin/end, null, and Boolean events use `Source`; a chunk slice is
-  present only when the entire spelling belongs to the current chunk;
-- `Boolean_Data` is meaningful only for `Boolean_Value`;
-- name, string, and number fragment events always have a nonempty raw slice;
-- all raw token octets between the matching begin and end events occur exactly
-  once, in order, without a gap or overlap across fragment `Source` ranges;
-- `Decoded_Is_Raw_Range` means the raw slice is complete valid UTF-8 ending at a
-  scalar boundary and is also the decoded output;
-- `No_Decoded_Fragment` reports an incomplete split escape or UTF-8 sequence,
-  or a number fragment;
-- `Decoded_Inline_Scalar` contains exactly one complete UTF-8 scalar derived
-  from an escape or from raw UTF-8 carried across chunks; `Decoded_Source`
-  covers every source octet that produced that scalar, including earlier raw
-  fragments;
-- `Is_Duplicate` is meaningful only for `Name_End` under
-  `Detect_And_Report_V1`.
+`Document_Begin`, `Document_End`, `Number_Begin`, and `Number_End` have a
+zero-length source at their exact stream position. Object/array delimiters and
+name/string opening and closing quotes have their exact one-octet source.
+Null/Boolean source covers its complete literal. Fragment source covers exactly
+that event's raw piece. Successive raw-bearing events for one name, string, or
+number cover its lexical source in order without gaps or overlap, without
+promising a particular coalescing across chunk schedules.
 
-Begin and end quote events own the quote octets. Fragment events cover only
-contents between quotes. Number begin and end events have zero-length source
-ranges at the token boundaries; number fragments cover the complete lexeme.
-`Document_End` follows the root end event and precedes trailing-whitespace
-validation. `Document_Complete` is an outcome, not another event.
+`Has_Raw_Slice` is true for object/array delimiters, name/string begin,
+fragment, and end events, number fragments, null, and Boolean. It is false for
+document begin/end and zero-length number begin/end. `Decoded_Kind` is
+`No_Decoded_Fragment` for every event except a name/string fragment.
 
-Fragment boundaries may change with chunking. Concatenated raw fragment ranges,
-decoded output, and the non-fragment grammar-event sequence do not.
+For a scalar split across calls, a fragment's `Source` and raw slice cover only
+the piece in the returning call, while `Decoded_Source` may begin in an earlier
+call and covers the complete scalar or escape provenance. A
+`No_Decoded_Fragment` piece is never appended to decoded output; the later
+`Decoded_Inline_Scalar` appends the completed scalar exactly once. A final
+raw-only provisional piece caused by name-resource denial is followed by a
+zero-consumption terminal failure.
 
-## Parser lifecycle and step rules
+A raw range is borrowed only from the exact unchanged `Input` actual supplied
+to the `Step` or `Drain` call that returned it. `Input_Origin` is the parser's
+absolute byte position before that call. `Resolve_Raw_Slice` validates the
+complete origin/length window and returns counts relative to that input's
+`First`; it never returns an Ada array index or raises for a wrong window. On
+`No_Raw_Slice` or `Wrong_Input_Window`, the returned range contains zero counts. The
+event retains no access value. A consumer must observe or copy raw bytes before the input actual
+is released, modified, or reused. In particular, a Serde adapter may not retain
+such a range in a builder.
 
-A newly declared parser is `Uninitialized`.
+## Parser lifecycle
 
-| Operation and state | Result and next state |
-| --- | --- |
-| `Initialize` in `Uninitialized` | Valid profile: `Ready`; invalid profile: `Failed`. |
-| `Initialize` otherwise | `Invalid_State`; state and retained diagnostic unchanged. |
-| `Step` in `Uninitialized` | `Call_Rejected`, consumes zero, reports `Invalid_State`, remains `Uninitialized`. |
-| First `Step` in `Ready` | Charges and returns `Document_Begin`, consumes zero, enters `Active`. |
-| `Step` in `Active` | One event, `Need_Input`, `Document_Complete`, or terminal `Step_Failed`. |
-| `Step` in a terminal state | `Call_Rejected` with `Invalid_State`; state and retained diagnostic unchanged. |
-| `Abort_Document` in `Uninitialized` | No-op; remains `Uninitialized`. |
-| `Abort_Document` in `Ready`, `Active`, or `Completed` | Enters `Aborted`; no diagnostic is fabricated. |
-| `Abort_Document` in `Failed` | Enters `Aborted` and retains the primary diagnostic. |
-| `Abort_Document` in `Aborted` | No-op. |
-| `Reset` in `Completed`, `Failed`, or `Aborted` | Valid profile: fresh `Ready`; invalid profile: `Failed`. |
-| `Reset` otherwise | `Invalid_State`; state and counters unchanged. |
+`Initialize` is accepted only in `Uninitialized`. It validates and freezes the
+complete profile, clears parser state, and enters `Ready` without consuming
+input. Unsupported or incompatible profiles enter `Failed` with no applied
+profile. The first accepted parsing call enters `Active`.
 
-`Need_Input` consumes the complete supplied array and returns no event. An
-event may consume only a prefix. The caller resubmits the unconsumed suffix;
-`Consumed` is a count, never an index. `End_Of_Input = True` certifies that no
-octet follows the supplied array. When an event consumes only a prefix of a
-final array, the caller passes `True` again with the suffix. When an event
-consumes the final octet, the caller passes an empty final array on the next
-step so the parser can apply EOF. An empty nonfinal array returns `Need_Input`.
+`Step` returns one event, `Need_Input`, `Document_Complete`, `Step_Failed`, or
+`Call_Rejected`. `Consumed` is a count from `Input'First`. A nonfinal empty
+input may return `Need_Input`; final input deterministically completes or
+fails. `End_Of_Input` is latched when an otherwise legal `Step`/non-null
+`Drain` call is admitted, even if that call returns after one event or because
+output fills. Every resubmitted suffix must keep it true. A false value after
+the latch is rejected before input consumption, output, or parser-state change.
 
-After the root finishes, the parser returns `Document_End`, consumes trailing
-RFC whitespace on later steps, rejects other trailing input, and returns
-`Document_Complete` only after final input. Supplying bytes after a completed
-document is a rejected call because `Completed` is terminal.
+`Drain` uses the same semantic engine and event grammar as `Step`. Only the
+`Produced`-component prefix beginning at `Events'First` is eligible. `Consumed` is a count from
+`Input'First`; every raw range refers to that exact input. A null event array
+returns `Output_Full`, zero consumed, zero produced, and leaves the parser
+unchanged. Filling the output takes precedence over a later pending terminal
+condition; the next call reports it. Produced events are provisional even if
+the same call reports failure. Capacity-one `Drain` calls over each unconsumed
+suffix, preserving latched finality, produce the same transcript and terminal
+result as repeated `Step` calls; stop precedence need not match in one call.
 
-A malformed-input or resource failure returns `Step_Failed`, enters `Failed`,
-publishes no event from that step, and retains its primary diagnostic. A
-protocol misuse returns `Call_Rejected` and does not overwrite a terminal
-diagnostic. `Reset` does not call or reset `Budget`.
+`Document_Complete` follows `Document_End`, enters `Completed`, and is the only
+parser acceptance gate. A terminal malformed/resource failure retains its
+primary diagnostic until cleanup/reset. `Abort_Document` is nonraising and
+idempotent in active/failure cleanup states. `Reset` creates a fresh `Ready`
+operation only from `Completed`, `Failed`, or `Aborted`, after validating the
+new explicit profile. Illegal lifecycle calls are nonmutating and cannot
+replace a retained primary diagnostic.
 
-`Consumed` is meaningful for every outcome. `Item` is meaningful only for
-`Event_Ready`. `Diagnostic` is cleared for `Event_Ready`, `Need_Input`, and
-`Document_Complete`; it describes the call for `Step_Failed` and
-`Call_Rejected`. An invalid profile clears the applied-profile presence flag;
-it never exposes a rejected profile as applied.
+The parser is bounded by caller-selected `Maximum_Depth`, decoded-name octet
+capacity, and name/index capacity. There are no defaults. In preserve mode the
+name capacities may be zero and no duplicate resource failure is possible.
+Strict mode charges physical storage only after decoding and detects equality
+at the later name's end; it publishes no later `Name_End` and reports the
+later opening quote as the primary source coordinate. Detection is bounded by
+the caller-backed crit-bit index with no quadratic or collision-only fallback.
 
-## Parser capacities
+## Source diagnostics
 
-Root scalar depth is zero. The root container depth is one. A container open is
-rejected before mutation when its resulting live depth exceeds
-`Maximum_Depth`.
+Parser source coordinates are zero-based absolute input-octet offsets. Invalid
+UTF-8 blames the octet that proves invalidity, except an overlong, surrogate,
+or out-of-range sequence whose completed prefix blames its stored lead. An
+unknown single-character escape blames its offending character; an invalid
+`\u` hex digit blames the first nonhex octet. A high surrogate followed by a
+raw character, quote, or valid non-low `\u` escape blames the high-surrogate
+escape start. A malformed following escape such as `\q` blames its offending
+character. A lone low surrogate blames its own reverse solidus.
+Truncation reports the first missing octet position. Depth denial reports the
+container opener. Storage denial during a name reports that name's opening
+quote. Offset exhaustion reports the first unrepresentable position.
 
-`Name_Octet_Capacity` is the total number of decoded name octets that can be
-live across all open objects plus the current candidate name. Nested objects
-share one LIFO arena; closing an object restores its entry mark.
+## Token collector
 
-`Name_Capacity` independently bounds the live leaf slots and internal crit-bit
-node slots shared across all open objects. Each retained unique name uses one
-leaf. Each nonempty object with `N` unique names uses `N - 1` internal nodes.
-The current candidate consumes name octets but no leaf or node until successful
-insertion. A permitted duplicate consumes no new leaf or node and its candidate
-octets are reclaimed after `Name_End`. With `Preserve_Unchecked_V1`, both name
-capacities are ignored and may be zero.
+The collector binds one caller-provided unconstrained array and performs no
+allocation. `Begin_Token` starts unpublished staging. `Append` accepts arbitrary
+array bounds and is atomic per call: all supplied octets are copied or none are.
+It retains no input reference. `Complete_Token` publishes the length only after
+all staged bytes are present. Until then the storage is candidate state and the
+caller must not interpret it as a completed token. Capacity failure publishes
+no length and enters `Failed`. `Abort_Token` and `Reset` are nonraising and do
+not replenish any future external budget.
 
-An empty name uses one leaf and zero name octets. When duplicate detection is
-enabled and `Name_Capacity = 0`, its opening quote fails with
-`Duplicate_Index_Exhausted`. Other capacity failures report the first source
-octet whose scalar or insertion cannot be retained.
+The collector is syntax-neutral about its byte source: a parser consumer sends
+decoded name/string fragments or exact number fragments according to the
+selected `Token_Kind`. It does not recharge parser work or perform numeric
+conversion.
 
-## Writer lifecycle and grammar
+The collector transition table is:
 
-`Initialize` validates and freezes a profile and enters `Ready` without touching
-the destination. `Begin_Document` is the only operation legal in `Ready`. It
-advances its observational call counter, validates the state, calls
-`Destination_Begin`, and enters `Active` only after success. It has no deniable
-budget charge. Failed begin enters `Failed` with no destination abort
-obligation.
+| Call and state | Resulting state and publication |
+|---|---|
+| `Begin_Token` in `Empty` | `Collecting`, zero staged/public length. |
+| `Append` in `Collecting` | Complete copy: remains `Collecting`; capacity denial: `Failed`, public length zero. Empty input is accepted without effect. |
+| `Complete_Token` in `Collecting` | `Complete`, publishes the exact staged length, including zero. |
+| `Abort_Token` in any state | Idempotent `Empty`, public/staged lengths zero; retained bytes are unspecified. |
+| `Reset` in any state | Fresh `Empty`, public/staged lengths zero; retained bytes are unspecified. |
+| Any other call/state combination | `Invalid_Order`, no state or publication change. |
 
-While `Active`, exactly one root follows this grammar:
+Successful `Begin_Token` and successful or empty `Append` return
+`Operation_Accepted`; successful `Complete_Token` returns `Token_Completed`;
+capacity denial returns `Storage_Exhausted`. `Kind` in `Collecting` or
+`Complete` is the argument accepted by `Begin_Token`. The readable completed
+prefix begins at `Storage'First`.
 
-```text
-Value := Put_Null | Put_Boolean
-       | Begin_Number Put_Number_Fragment* End_Number
-       | Begin_String Put_String_Fragment* End_String
-       | Begin_Array Value* End_Array
-       | Begin_Object
-           (Begin_Name Put_Name_Fragment* End_Name Value)*
-         End_Object
-```
+The bound storage outlives the collector. The caller does not independently
+read or write it during a mutating call or while state is `Collecting`. In
+`Complete`, the caller may read exactly the first `Collected_Length` components
+and does not mutate them until `Reset` or `Abort_Token`. The collector never
+clears or promises values outside the published prefix.
 
-All array bounds are accepted. Empty fragments are legal no-ops that still form
-public writer calls; they consume no input or output budget. Name and string
-fragments may split UTF-8 at any byte. Number fragments may split at any byte.
-The writer retains only bounded lexical carry.
+## Writer destination and lifecycle
 
-`Finish_Document` is legal only after exactly one balanced root and no active
-lexical token. It advances its observational call counter, invokes
-`Destination_Commit`, and enters `Completed` only on `Stage_Accepted`. Any
-grammar, UTF-8, number, budget,
-destination, or commit failure while active latches a primary diagnostic,
-invokes `Destination_Abort` exactly once, records an abort cleanup failure only
-as secondary, and enters `Failed`.
+The destination is a whole-document transaction. `Begin` starts unpublished
+staging; `Commit` is the only publication point; `Abort` ends staging without
+publication even when it reports cleanup failure. A failed begin owns no
+transaction. The destination outlives writer finalization and is not accessed
+independently while the writer is active.
 
-`Abort_Document` in `Ready` enters `Aborted` without a destination call. In
-`Active`, it invokes destination abort exactly once and enters `Aborted`; an
-abort cleanup error is primary because no earlier failure exists. In `Failed`
-or `Aborted` it is an idempotent no-op preserving diagnostics. In `Completed`
-it is a no-op and cannot revoke publication. In `Uninitialized` it is a no-op.
+Every destination formal is synchronous and nonraising. It does not call the
+writer recursively, mutate writer aliases, or retain `Data` beyond `Write`.
+The caller defers asynchronous abort, cancellation, and transfer of control
+across a writer call, destination formal, or writer finalization. A failed
+`Begin` creates no transaction. A failed `Commit` publishes nothing and leaves
+the transaction abortable. `Abort` ends the transaction without publication
+even when its status is `Abort_Failed`. Violating a generic formal obligation
+is outside the writer contract; the writer does not attempt recovery from a
+raised exception or dangling retained input.
 
-`Reset` is legal only in `Completed`, `Failed`, or `Aborted`. It validates a new
-profile and enters `Ready` without beginning a destination transaction. It does
-not reset `Budget`.
+`Destination_Write` is bulk and prefix-reporting. On success it accepts the
+complete array. On capacity exhaustion it accepts the longest prefix and
+returns that count. On another error it returns zero and that call has no
+staging effect. Counts are independent of the array's lower bound. This permits
+bulk throughput while making capacity failure occur at the exact staged byte
+regardless of caller fragment boundaries. Timing of an injected external
+destination error is not chunk-invariant.
 
-A document call that violates the call grammar in `Ready` or `Active` returns
-`Invalid_Writer_Grammar` at its `JSON_Call_Ordinal` and enters `Failed`. An
-active writer aborts its destination exactly once; a ready writer has no
-transaction to abort. In contrast, a call rejected solely because the writer is
-`Uninitialized` or terminal returns `Invalid_State` without changing state,
-staging output, invoking the destination, advancing the semantic call ordinal,
-or replacing a terminal diagnostic. The documented idempotent/no-op
-`Abort_Document` cases are successful lifecycle operations, not rejected calls.
-`Initialize` outside `Uninitialized` and `Reset` outside its eligible terminal
-states follow the same nonmutating `Invalid_State` rule.
+The result invariants are total: `Write_Succeeded` means
+`Written = Data'Length`; `Write_Exhausted` means
+`Written < Data'Length` and that count is the exact longest accepted prefix;
+`Write_Failed` means `Written = 0` and no effect for the call. In every case
+`Written <= Data'Length`. Empty data can return only `Write_Succeeded` with
+zero written or `Write_Failed`; it cannot return `Write_Exhausted`.
 
-Successful `Initialize` and successful `Reset` zero JSON's per-operation work
-counters. A newly declared uninitialized parser or writer also reports zero
-counters. A rejected initialize/reset profile and an illegal reset do not change
-the retained counters. JSON retains no duplicate budget total; caller-owned
-`Budget` is the authority for accepted charges and is never reset or replenished
-by JSON.
+The writer validates and freezes an explicit trusted ordinary profile in
+`Initialize`, then enters `Ready` without touching the destination.
+`Begin_Document` begins the transaction and enters `Active`. Calls follow the
+JSON grammar; no container length is supplied. Name/string fragments may split
+inside UTF-8 sequences. The writer retains at most one scalar's derived carry,
+validates UTF-8 incrementally, and emits maximal safe spans in bulk. Number
+fragments preserve exact octets and share the strict parser number DFA.
 
-## Diagnostics and ordinals
+Grammar, UTF-8, number, offset, destination, and commit failures abort an owned
+transaction exactly once and retain the JSON failure as primary. Abort failure
+is secondary. A commit failure does not claim publication and is followed by
+abort. Explicit abort without an earlier failure promotes abort failure to
+primary. Finalization is a nonraising safety net that aborts one still-owned
+transaction and cannot replace an already observable primary diagnostic.
 
-`Clear` sets `Code = No_Error`, every `Has_*` field to `False`, and both
-coordinate kinds to `No_Coordinate`. Fields guarded by a false presence flag
-are unspecified and must not be read. A non-error operation returns a cleared
-diagnostic.
+`Finish_Document` requires one complete balanced root, commits, and enters
+`Completed` only on success. `Reset` is accepted only from terminal states and
+never implicitly aborts an active document. Calls rejected only for lifecycle
+state do not touch the destination or replace terminal diagnostics.
 
-The first operation failure is primary. Later destination-abort or cleanup
-failure sets `Has_Secondary` and `Secondary` without replacing the primary. An
-explicit abort cleanup failure with no primary uses `Abort_Failed` as primary.
-When abort failure is secondary, its coordinate is retained separately in
-`Secondary_Coordinate` and `Secondary_Offset`; it never replaces the primary
-coordinate.
+Writer token coordinates are zero-based aggregate caller token-input octets.
+Staged-output coordinates are zero-based candidate octets. Grammar/depth errors
+use the zero-based public JSON call ordinal. Destination exhaustion reports the
+first unaccepted staged byte. Invalid UTF-8 and number input report the exact
+token byte that proves invalidity; truncation reports the first missing token
+byte.
 
-Profile failures and invalid-state calls have no coordinate. Parser input errors
-use `Source_Byte`. Parser event-budget denial without a source byte uses
-`JSON_Event_Ordinal`. Destination begin failure uses `Staged_Output_Byte` zero.
-Destination write, commit, and abort failures use the next staged-output byte.
-Invalid writer token input uses `Writer_Token_Byte`. `Invalid_Writer_Grammar`
-uses `JSON_Call_Ordinal`.
+The closed writer lifecycle is:
 
-Destination outcomes map exactly as follows:
+| Call and state | Resulting state and effects |
+|---|---|
+| `Initialize` in `Uninitialized` | Valid profile: `Ready` with applied profile; invalid: `Failed`, no applied profile, no destination call. |
+| `Initialize` elsewhere | Nonmutating `Invalid_State`; retained terminal diagnostic wins. |
+| `Begin_Document` in `Ready` | Successful destination begin: `Active` and transaction owned; failed begin: `Failed`, no ownership and no abort. |
+| Grammar call in `Ready` other than `Begin_Document` | Reserves its call ordinal, returns `Invalid_Writer_Grammar`, enters `Failed`, and makes no destination call. |
+| Grammar call in `Active` (including another `Begin_Document`) | Success remains `Active`; grammar/further failure aborts once and enters `Failed`. |
+| `Finish_Document` in `Active` | Balanced root and successful commit: `Completed`; validation/commit failure aborts once and enters `Failed`. |
+| `Abort_Document` in `Ready` | `Aborted`, no destination call. |
+| `Abort_Document` in `Active` | Destination abort exactly once, then `Aborted`; abort failure is primary if none existed. |
+| `Abort_Document` in `Failed` or `Aborted` | Idempotent no-op; retain diagnostics. |
+| `Abort_Document` in `Uninitialized` or `Completed` | Nonmutating no-op. |
+| `Reset` in `Completed`, `Failed`, or `Aborted` | Valid profile: fresh `Ready`; invalid: `Failed` with no applied profile. Never aborts implicitly. |
+| `Reset` elsewhere | Nonmutating `Invalid_State`; no destination call. |
+| Other mutating call in uninitialized/terminal state | Nonmutating `Invalid_State`; retained terminal diagnostic wins. |
 
-- `Destination_Begin`: `Stage_Capacity_Denied` becomes
-  `Destination_Exhausted`; `Stage_Error` becomes `Destination_Failed`. Both use
-  staged-output byte zero, enter `Failed`, and create no abort obligation.
-- `Destination_Write`: `Stage_Capacity_Denied` becomes
-  `Destination_Exhausted`; `Stage_Error` becomes `Destination_Failed`. Both use
-  the current staged length (the first octet of the all-or-nothing requested
-  span), latch primary, abort once, and enter `Failed`.
-- `Destination_Commit`: `Stage_Capacity_Denied` becomes
-  `Destination_Exhausted`; `Stage_Error` becomes `Commit_Failed`. Both use the
-  current staged length, latch primary, abort once, and enter `Failed`.
-- `Destination_Abort`: either nonaccepted outcome becomes `Abort_Failed` at the
-  current staged length. It is secondary when a primary already exists and is
-  primary for an explicit abort. In all cases the destination contract requires
-  the transaction to have ended without publication.
+Initialization, reset, explicit abort, queries, and finalization have no JSON
+call ordinal. After initialize/reset the next admitted ready/active grammar call
+reserves ordinal zero before effects; each later admitted grammar call reserves
+the next value. Calls rejected solely because the writer is uninitialized or
+terminal do not reserve an ordinal. When the next ordinal equals
+`Byte_Offset'Last`, the call is denied before effects with `Offset_Exhausted` at
+that last representable coordinate; an active transaction aborts once. Thus
+successful admitted calls use ordinals zero through `Byte_Offset'Last - 1`.
+Token and staged offsets follow the same boundary convention. A bulk span may
+advance through the representable prefix to make the next offset equal
+`Byte_Offset'Last`; the next octet is denied before staging and reports that
+last representable coordinate. An earlier destination exhaustion/error retains
+precedence over a later offset boundary.
 
-`Writer_Calls` advances on entry to every document call and saturates
-independently of the semantic call ordinal. `Destination_Calls` advances
-immediately before each actual destination invocation. `Cleanup_Calls` advances
-immediately before each parser cleanup or destination-abort invocation.
-Saturation uses the nondeniable rule below and never prevents the invocation.
+Destination diagnostics map as follows:
 
-Parser event ordinals count only chunk-invariant non-fragment grammar events and
-advance after the relevant event charge succeeds. Before returning an event at
-unsigned 64-bit maximum, the parser instead returns `Counter_Exhausted` at that
-`JSON_Event_Ordinal`, enters `Failed`, and performs no event charge.
+- failed `Begin`: `Destination_Failed`, `Staged_Output_Byte` zero, no ownership;
+- exhausted `Write`: `Destination_Exhausted` at old staged offset plus `Written`;
+- failed `Write`: `Destination_Failed` at the old staged offset;
+- failed `Commit`: `Commit_Failed` at the next staged offset, followed by abort;
+- failed `Abort`: `Abort_Failed` at the next staged offset, secondary when a
+  primary failure already exists;
+- depth or writer grammar denial: `JSON_Call_Ordinal` of the admitted call;
+- malformed name/string/number input: aggregate `Writer_Token_Byte`;
+- token or staged offset exhaustion: the first denied effect, reported as
+  `Offset_Exhausted` at `Byte_Offset'Last`.
 
-Writer call ordinals start at zero after successful initialize/reset. A document
-call in `Ready` or `Active` reserves and advances its ordinal before grammar
-validation. If the current ordinal is unsigned 64-bit maximum, the call instead
-returns `Counter_Exhausted` at that `JSON_Call_Ordinal`; an active writer aborts
-once and enters `Failed`, while a ready writer enters `Failed` without abort.
-Calls rejected because the writer is uninitialized or terminal, plus
-initialize, reset, queries, and cleanup destination calls, do not advance the
-JSON call ordinal.
+`Clear` sets `Code` and `Secondary` to `No_Error`, both coordinates to
+`No_Coordinate`, and both offsets to zero. A primary offset is eligible only
+when its coordinate is not `No_Coordinate`. Secondary coordinate/offset are
+eligible only when `Secondary /= No_Error`; otherwise they remain cleared.
 
-`Denied_Dimension` is meaningful only when `Has_Denied_Dimension = True`.
-Budget denial records the exact dimension. The offset and coordinate follow
-the architecture's charge checkpoint and blame rules.
+Every successful writer call returns a cleared diagnostic. Empty name, string,
+and number fragments are legal no-ops, still reserve their grammar-call
+ordinal, and return a cleared diagnostic. Abort no-ops in `Uninitialized` and
+`Completed` return a cleared diagnostic; abort no-ops in `Failed` or `Aborted`
+return the retained terminal diagnostic. Other rejected lifecycle calls return
+their deterministic rejection diagnostic without changing retained state.
 
-Writer token offsets aggregate every nonempty fragment from zero and do not
-depend on fragment bounds or splitting. Name/string UTF-8 failures use these
-exact rules:
+Fragment processing is defined as if validation and resulting output occur in
+input order. An earlier destination exhaustion/error on an emitted prefix wins
+over malformed UTF-8/number or offset failure proved by a later input byte.
+Implementations may scan ahead and write bulk spans only when they return the
+same primary status, coordinate, staged prefix, and cleanup behavior. This rule
+is invariant under equivalent fragment schedules except for explicitly
+injected external destination-error timing.
 
-- an illegal lead octet or unexpected continuation reports that octet;
-- a required continuation replaced by another octet reports the replacement;
-- an overlong, surrogate, or out-of-range encoding reports its lead octet;
-- `End_Name` or `End_String` with an incomplete sequence reports the aggregate
-  token length (the position of the missing continuation) as `Invalid_UTF8`.
+## Numbers
 
-Number grammar reports the first octet that makes the DFA invalid. This includes
-the second integer digit after a strict leading zero and the first non-ASCII or
-otherwise disallowed spelling octet. `End_Number` in a nonaccepting state reports
-the aggregate token length as `Invalid_Number`; an empty number therefore fails
-at zero. Token-offset exhaustion fails before inspecting the next supplied octet
-and reports that next offset. The failing call stages no bytes of the rejected
-effect and follows the active-writer abort contract.
+The parser and writer preserve exact number lexemes. Numeric conversion is a
+separate checked operation over a complete byte array and never rereads parser
+input. Integer conversion accepts only strict JSON integer spellings; decimal
+fractions/exponents are invalid syntax for integer conversion. It detects range
+before arithmetic overflow. Signed conversion maps `-0` to zero. Unsigned
+conversion rejects every negative spelling, including `-0`.
 
-## Charges and counters
+Integer rendering is exact base ten with no leading zero, exponent, or added
+plus sign. It is transactional: insufficient output capacity returns zero and
+leaves the caller array unchanged.
 
-The exact charge order in `docs/architecture.md` is part of this draft contract.
-Charge amounts use the count subtype already defined by `Ada.Streams`; JSON does
-not invent a separate width or ceiling. The caller-owned hook decides how to
-accumulate accepted charges and denies before its own total would overflow.
+Binary64 uses `Interfaces.IEEE_Float_64`, strict JSON syntax, and IEEE 754
+round-to-nearest ties-to-even. Results distinguish exact, rounded, invalid,
+underflow-to-signed-zero, and finite overflow. Exact lexical `-0` is exact and
+publishes negative zero; nonzero underflow publishes status only and no rounded
+value. Overflow never publishes infinity. Rendering rejects nonfinite values and
+emits the shortest strict JSON decimal that round-trips to the same binary64,
+preferring fixed notation when fixed and exponent forms have equal byte length.
+Otherwise scientific notation has one nonzero digit before the decimal point.
+Among equally short coefficients that round-trip, rendering selects the decimal
+closest to the exact binary value; an exact distance tie selects the coefficient
+whose final retained decimal digit is even.
+It uses lowercase `e`, no plus on a positive exponent, and `-0` for negative
+zero. Every render failure sets produced length to zero and leaves output
+unchanged.
 
-`Duplicate_Index_Slots` is a single aggregate charge after comparison proves a
-name unique and before index mutation: amount one for the first leaf in an
-object, and amount two for each later unique name (one leaf plus one internal
-node). A duplicate charges zero slots. Physical leaf/internal-node capacity is
-checked before this charge. A denied aggregate charge retains neither slot.
+Decimal/application conversions remain separate future packages. Binary64
+behavior and representation claims require maintained GNAT/platform evidence;
+mere compilation is insufficient.
 
-`Step_Calls` counts every `Step` attempt, including rejected and empty calls.
-`Need_Input_Count` counts returned `Need_Input` outcomes.
-`Fragment_Deliveries` counts fragment events. `Writer_Calls` follows the call
-entry rule and counts every attempted document call, including calls rejected
-in uninitialized or terminal states. `Destination_Calls` counts every actual
-destination invocation.
-`Cleanup_Calls` counts parser cleanup and destination-abort invocations.
+## Optional accounting
 
-The six transport observations (`Step_Calls`, `Need_Input_Count`,
-`Fragment_Deliveries`, `Writer_Calls`, `Destination_Calls`, and
-`Cleanup_Calls`) saturate at `Counter_Value'Last` and set
-`Transport_Counter_Overflowed`. `Maximum_Live_Depth` uses the same saturation
-rule. Saturation never changes a call outcome, parser/writer state, primary or
-secondary diagnostic, or mandatory cleanup. `Counters` returns the saturated
-values and flag in every state. Parser chunk schedules can vary only these
-documented transport counters, their overflow flag, and fragment segmentation;
-semantic charges remain equal.
+The trusted baseline is the functional and performance authority. A future
+accounted package must statically reuse the same semantic engine while binding
+one nonreplaceable caller ledger for an operation. Its cost-model identity,
+positive prefix-composable grants, dimensions, charge order, debit/denial
+behavior, offsets, reset/rebind rules, and fragmentation invariance require a
+separate public declaration and consumer review. Trusted generated assembly
+must contain no accounting state, calls, or branches.
