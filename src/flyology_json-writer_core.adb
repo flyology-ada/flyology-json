@@ -306,6 +306,18 @@ package body Flyology_JSON.Writer_Core is
          Emit (Self, Data, Succeeded, Diagnostic);
       end Emit_Byte;
 
+      procedure Emit_Byte_Pair
+        (Self       : in out Writer;
+         First      : Element;
+         Second     : Element;
+         Succeeded  : out Boolean;
+         Diagnostic : out Writer_Core.Diagnostic)
+      is
+         Data : constant Ada.Streams.Stream_Element_Array (1 .. 2) := [First, Second];
+      begin
+         Emit (Self, Data, Succeeded, Diagnostic);
+      end Emit_Byte_Pair;
+
       function Value_Is_Allowed (Self : Writer) return Boolean is
       begin
          if Self.Token /= No_Token or else Self.Root_Complete then
@@ -708,11 +720,17 @@ package body Flyology_JSON.Writer_Core is
             return;
          end if;
 
-         Prepare_Value (Self, Succeeded, Diagnostic);
-         if not Succeeded then
-            return;
+         if Self.Depth > 0
+           and then Self.Stack (Self.Depth).Kind = Array_Container
+           and then Self.Stack (Self.Depth).Has_Items
+         then
+            Emit_Byte_Pair (Self, Comma, Opener, Succeeded, Diagnostic);
+         else
+            Prepare_Value (Self, Succeeded, Diagnostic);
+            if Succeeded then
+               Emit_Byte (Self, Opener, Succeeded, Diagnostic);
+            end if;
          end if;
-         Emit_Byte (Self, Opener, Succeeded, Diagnostic);
          if not Succeeded then
             return;
          end if;
@@ -830,12 +848,10 @@ package body Flyology_JSON.Writer_Core is
          end if;
 
          if Self.Stack (Self.Depth).Has_Items then
-            Emit_Byte (Self, Comma, Succeeded, Diagnostic);
-            if not Succeeded then
-               return;
-            end if;
+            Emit_Byte_Pair (Self, Comma, Quote, Succeeded, Diagnostic);
+         else
+            Emit_Byte (Self, Quote, Succeeded, Diagnostic);
          end if;
-         Emit_Byte (Self, Quote, Succeeded, Diagnostic);
          if not Succeeded then
             return;
          end if;
@@ -1130,6 +1146,7 @@ package body Flyology_JSON.Writer_Core is
       procedure Put_Literal
         (Self       : in out Writer;
          Value      : Ada.Streams.Stream_Element_Array;
+         With_Comma : Ada.Streams.Stream_Element_Array;
          Ordinal    : Byte_Offset;
          Diagnostic : out Writer_Core.Diagnostic)
       is
@@ -1139,11 +1156,17 @@ package body Flyology_JSON.Writer_Core is
             Grammar_Failure (Self, Ordinal, Diagnostic);
             return;
          end if;
-         Prepare_Value (Self, Succeeded, Diagnostic);
-         if not Succeeded then
-            return;
+         if Self.Depth > 0
+           and then Self.Stack (Self.Depth).Kind = Array_Container
+           and then Self.Stack (Self.Depth).Has_Items
+         then
+            Emit (Self, With_Comma, Succeeded, Diagnostic);
+         else
+            Prepare_Value (Self, Succeeded, Diagnostic);
+            if Succeeded then
+               Emit (Self, Value, Succeeded, Diagnostic);
+            end if;
          end if;
-         Emit (Self, Value, Succeeded, Diagnostic);
          if Succeeded then
             Complete_Value (Self);
             Diagnostic := Clear_Diagnostic;
@@ -1155,6 +1178,8 @@ package body Flyology_JSON.Writer_Core is
          Reserved : Boolean;
          Value    : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
            [Character'Pos ('n'), Character'Pos ('u'), Character'Pos ('l'), Character'Pos ('l')];
+         With_Comma : constant Ada.Streams.Stream_Element_Array (1 .. 5) :=
+           [Comma, Character'Pos ('n'), Character'Pos ('u'), Character'Pos ('l'), Character'Pos ('l')];
       begin
          if Self.Current_State /= Active then
             Reject_State (Self, Diagnostic);
@@ -1162,7 +1187,7 @@ package body Flyology_JSON.Writer_Core is
          end if;
          Reserve_Call (Self, Ordinal, Reserved, Diagnostic);
          if Reserved then
-            Put_Literal (Self, Value, Ordinal, Diagnostic);
+            Put_Literal (Self, Value, With_Comma, Ordinal, Diagnostic);
          end if;
       end Put_Null_Impl;
 
@@ -1173,8 +1198,21 @@ package body Flyology_JSON.Writer_Core is
          Reserved : Boolean;
          True_Text : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
            [Character'Pos ('t'), Character'Pos ('r'), Character'Pos ('u'), Character'Pos ('e')];
+         True_With_Comma : constant Ada.Streams.Stream_Element_Array (1 .. 5) :=
+           [Comma,
+            Character'Pos ('t'),
+            Character'Pos ('r'),
+            Character'Pos ('u'),
+            Character'Pos ('e')];
          False_Text : constant Ada.Streams.Stream_Element_Array (1 .. 5) :=
            [Character'Pos ('f'),
+            Character'Pos ('a'),
+            Character'Pos ('l'),
+            Character'Pos ('s'),
+            Character'Pos ('e')];
+         False_With_Comma : constant Ada.Streams.Stream_Element_Array (1 .. 6) :=
+           [Comma,
+            Character'Pos ('f'),
             Character'Pos ('a'),
             Character'Pos ('l'),
             Character'Pos ('s'),
@@ -1187,9 +1225,9 @@ package body Flyology_JSON.Writer_Core is
          Reserve_Call (Self, Ordinal, Reserved, Diagnostic);
          if Reserved then
             if Value then
-               Put_Literal (Self, True_Text, Ordinal, Diagnostic);
+               Put_Literal (Self, True_Text, True_With_Comma, Ordinal, Diagnostic);
             else
-               Put_Literal (Self, False_Text, Ordinal, Diagnostic);
+               Put_Literal (Self, False_Text, False_With_Comma, Ordinal, Diagnostic);
             end if;
          end if;
       end Put_Boolean_Impl;

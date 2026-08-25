@@ -488,6 +488,145 @@ procedure Flyology_JSON.Writer_Core_Tests is
       Check (Target.Abort_Calls = 3, "write failure did not abort once");
    end Test_Destination_Failures;
 
+   procedure Test_Same_Call_Span_Fusion is
+      procedure Run_Container (Capacity : Count; Exact_Fit : Boolean) is
+         Target     : aliased Test_Destination;
+         Writer     : Writers.Writer (Target'Access, Maximum_Depth => 2);
+         Diagnostic : Core.Diagnostic;
+         Before     : Natural;
+      begin
+         Writers.Initialize (Writer, Diagnostic);
+         Writers.Begin_Document (Writer, Diagnostic);
+         Writers.Begin_Array (Writer, Diagnostic);
+         Writers.Put_Null (Writer, Diagnostic);
+         Target.Capacity := Capacity;
+         Before := Target.Write_Calls;
+         Writers.Begin_Object (Writer, Diagnostic);
+
+         Check (Target.Write_Calls = Before + 1, "separator and container opener were not fused");
+         if Exact_Fit then
+            Check_Clear (Diagnostic, "exact-fit fused container opener failed");
+            Target.Capacity := Fixture_Capacity;
+            Writers.End_Object (Writer, Diagnostic);
+            Writers.End_Array (Writer, Diagnostic);
+            Writers.Finish_Document (Writer, Diagnostic);
+            Check_Output (Target, To_Input ("[null,{}]"));
+         else
+            Check
+              (Diagnostic.Code = Errors.Destination_Exhausted,
+               "short fused container opener did not exhaust");
+            Check (Diagnostic.Offset = 6, "short fused container opener offset differs");
+            Check (Target.Staged_High_Water = 6, "short fused container prefix differs");
+            Check (Target.Abort_Calls = 1, "short fused container opener did not abort once");
+            Check (not Target.Published, "short fused container opener published output");
+         end if;
+      end Run_Container;
+
+      procedure Run_Name (Capacity : Count; Exact_Fit : Boolean) is
+         Target     : aliased Test_Destination;
+         Writer     : Writers.Writer (Target'Access, Maximum_Depth => 1);
+         Diagnostic : Core.Diagnostic;
+         Before     : Natural;
+      begin
+         Writers.Initialize (Writer, Diagnostic);
+         Writers.Begin_Document (Writer, Diagnostic);
+         Writers.Begin_Object (Writer, Diagnostic);
+         Writers.Begin_Name (Writer, Diagnostic);
+         Writers.Put_Name_Fragment (Writer, To_Input ("a", -9), Diagnostic);
+         Writers.End_Name (Writer, Diagnostic);
+         Writers.Put_Null (Writer, Diagnostic);
+         Target.Capacity := Capacity;
+         Before := Target.Write_Calls;
+         Writers.Begin_Name (Writer, Diagnostic);
+
+         Check (Target.Write_Calls = Before + 1, "separator and name quote were not fused");
+         if Exact_Fit then
+            Check_Clear (Diagnostic, "exact-fit fused name opener failed");
+            Target.Capacity := Fixture_Capacity;
+            Writers.Put_Name_Fragment (Writer, To_Input ("b", 73), Diagnostic);
+            Writers.End_Name (Writer, Diagnostic);
+            Writers.Put_Boolean (Writer, False, Diagnostic);
+            Writers.End_Object (Writer, Diagnostic);
+            Writers.Finish_Document (Writer, Diagnostic);
+            Check_Output (Target, To_Input ("{""a"":null,""b"":false}"));
+         else
+            Check
+              (Diagnostic.Code = Errors.Destination_Exhausted,
+               "short fused name opener did not exhaust");
+            Check (Diagnostic.Offset = 10, "short fused name opener offset differs");
+            Check (Target.Staged_High_Water = 10, "short fused name prefix differs");
+            Check (Target.Abort_Calls = 1, "short fused name opener did not abort once");
+            Check (not Target.Published, "short fused name opener published output");
+         end if;
+      end Run_Name;
+
+      procedure Run_Literal (Capacity : Count; Exact_Fit : Boolean) is
+         Target     : aliased Test_Destination;
+         Writer     : Writers.Writer (Target'Access, Maximum_Depth => 1);
+         Diagnostic : Core.Diagnostic;
+         Before     : Natural;
+      begin
+         Writers.Initialize (Writer, Diagnostic);
+         Writers.Begin_Document (Writer, Diagnostic);
+         Writers.Begin_Array (Writer, Diagnostic);
+         Writers.Put_Boolean (Writer, True, Diagnostic);
+         Target.Capacity := Capacity;
+         Before := Target.Write_Calls;
+         Writers.Put_Null (Writer, Diagnostic);
+
+         Check (Target.Write_Calls = Before + 1, "separator and literal were not fused");
+         if Exact_Fit then
+            Check_Clear (Diagnostic, "exact-fit fused literal failed");
+            Target.Capacity := Fixture_Capacity;
+            Writers.End_Array (Writer, Diagnostic);
+            Writers.Finish_Document (Writer, Diagnostic);
+            Check_Output (Target, To_Input ("[true,null]"));
+         else
+            Check
+              (Diagnostic.Code = Errors.Destination_Exhausted,
+               "short fused literal did not exhaust");
+            Check (Diagnostic.Offset = 9, "short fused literal offset differs");
+            Check (Target.Staged_High_Water = 9, "short fused literal prefix differs");
+            Check (Target.Abort_Calls = 1, "short fused literal did not abort once");
+            Check (not Target.Published, "short fused literal published output");
+         end if;
+      end Run_Literal;
+
+      procedure Run_Boolean_Literals is
+         Target     : aliased Test_Destination;
+         Writer     : Writers.Writer (Target'Access, Maximum_Depth => 1);
+         Diagnostic : Core.Diagnostic;
+         Before     : Natural;
+      begin
+         Writers.Initialize (Writer, Diagnostic);
+         Writers.Begin_Document (Writer, Diagnostic);
+         Writers.Begin_Array (Writer, Diagnostic);
+         Writers.Put_Null (Writer, Diagnostic);
+
+         Before := Target.Write_Calls;
+         Writers.Put_Boolean (Writer, True, Diagnostic);
+         Check_Clear (Diagnostic, "comma-prefixed true failed");
+         Check (Target.Write_Calls = Before + 1, "separator and true were not fused");
+
+         Before := Target.Write_Calls;
+         Writers.Put_Boolean (Writer, False, Diagnostic);
+         Check_Clear (Diagnostic, "comma-prefixed false failed");
+         Check (Target.Write_Calls = Before + 1, "separator and false were not fused");
+
+         Writers.End_Array (Writer, Diagnostic);
+         Writers.Finish_Document (Writer, Diagnostic);
+         Check_Output (Target, To_Input ("[null,true,false]"));
+      end Run_Boolean_Literals;
+   begin
+      Run_Container (Capacity => 7, Exact_Fit => True);
+      Run_Container (Capacity => 6, Exact_Fit => False);
+      Run_Name (Capacity => 11, Exact_Fit => True);
+      Run_Name (Capacity => 10, Exact_Fit => False);
+      Run_Literal (Capacity => 10, Exact_Fit => True);
+      Run_Literal (Capacity => 9, Exact_Fit => False);
+      Run_Boolean_Literals;
+   end Test_Same_Call_Span_Fusion;
+
    procedure Test_Grammar_And_Truncation is
       Target     : aliased Test_Destination;
       Writer     : Writers.Writer (Target'Access, Maximum_Depth => 1);
@@ -1184,6 +1323,7 @@ begin
    Test_Depth_And_Grammar;
    Test_Invalid_UTF8_And_Number;
    Test_Destination_Failures;
+   Test_Same_Call_Span_Fusion;
    Test_Grammar_And_Truncation;
    Test_Offset_Boundaries;
    Test_Ordered_Failure_Precedence;

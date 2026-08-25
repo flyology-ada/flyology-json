@@ -83,6 +83,45 @@ measured 670.57 us or 1,491.3 MiB/s with 2.28% CV. Escape-heavy string measured
 729.1 MiB/s smoke result; destination-call counts remain 3 and 2,573. No
 performance regression is evidenced by this bounded rerun.
 
+### Same-call structural-span fusion
+
+A later focused change combined punctuation already known within one public
+writer call: an array separator with a following object/array opener, a later
+object-member separator with its opening quote, and an array separator with a
+complete `null` or Boolean literal. It added no cross-call buffering, public
+API, capacity, allocation, or writer field. Call ordinals remain unchanged.
+Capacity exhaustion still accepts the exact longest prefix of the combined
+span. Timing of an injected external destination error remains explicitly
+dependent on bulk-span segmentation under the existing destination contract.
+
+This directional native-track pair used GNAT 16.2.0, GPRbuild 26.0.0,
+`-mcpu=native`, Apple arm64, and macOS 26.5.2. Both populations used 50 retained
+samples and produced the same 155,649 output octets and FNV-1a value
+`582790c203a9727d`. The base was repository commit
+`3a9e98f93a7a33b4ed29262237b99479284e2172`; the candidate writer body SHA-256
+was `ec6bda5e4075abc9b10328741b13caddcdff2395e70907925842994214be2706`.
+
+| Nested-structure writer | Median | Output throughput | CV | Destination calls |
+| --- | ---: | ---: | ---: | ---: |
+| Unfused base | 641.99 us | 231.22 MiB/s | 2.54% | 65,537 |
+| Fixed-span candidate | 598.63 us | 247.96 MiB/s | 2.75% | 53,250 |
+
+The candidate reduced latency 6.75%, increased throughput 7.24%, and removed
+12,287 destination calls (18.75%) in this pair. A generic temporary-array form
+measured only 639.38 us and was rejected; fixed two-octet spans and prebuilt
+comma-prefixed literals avoid that construction overhead. A reverse baseline
+run overlapped unrelated proof and native-library builds, reported 102.66% CV,
+and is excluded. The scheduled clean-commit job remains the authority for a
+retained cross-host result.
+
+Optimized AArch64 inspection found no separately emitted byte-pair helper and
+no allocation-runtime reference in the instantiated writer object. The writer
+remained 184 bytes. Core tests cover exact fit and one-octet-short capacity for
+all three fused shapes, exact failure coordinates and staged prefixes,
+transactional nonpublication, one destination call, and both Boolean
+spellings. The maintained complete test, corpus/oracle, external-consumer, and
+writer-assembly suite passed after the implementation change.
+
 Exact commands, run individually in a confirmed quiet window, were:
 
 ```sh
