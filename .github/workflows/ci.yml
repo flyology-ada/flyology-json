@@ -35,8 +35,12 @@ jobs:
           alr --non-interactive toolchain --select \
             gnat_native=${{ matrix.gnat }} \
             gprbuild=26.0.1
-      - name: Test parser core
-        run: alr test
+      - name: Test parser
+        run: |
+          if ! alr test; then
+            cat alire/alr_test_local.log
+            exit 1
+          fi
 
   benchmark-adapters:
     name: Benchmark adapters / ${{ matrix.os }} / ${{ matrix.track }}
