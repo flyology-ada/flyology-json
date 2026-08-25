@@ -17,6 +17,12 @@ do
   "$project_root/tests/bin/$test_program"
 done
 
+alr exec -- gprbuild -f -p -j0 -P tests/flyology_json_public_foundation_tests.gpr
+"$project_root/tests/bin/flyology_json-public_foundation_tests"
+
+alr exec -- gprbuild -f -p -j0 -P tests/flyology_json_writer_core_tests.gpr
+"$project_root/tests/bin/flyology_json-writer_core_tests"
+
 for corpus_schedule in monolith one-byte randomized
 do
   "$project_root/scripts/test-corpus-parser.sh" "$corpus_schedule"
