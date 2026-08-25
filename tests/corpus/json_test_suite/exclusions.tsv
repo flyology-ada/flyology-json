@@ -1,0 +1,5 @@
+# upstream-relative path	sha256	bytes	reason
+test_parsing/n_number_0e.json	cd279aa777afca083b346dbc2b62a1847c24f1556b619b7564842457f8949c93	4	historic JSON_checker provenance is not cleared for MIT/Apache-2.0 redistribution; upstream aggregate MIT notice is insufficient for these bytes
+test_parsing/n_number_0e+.json	3f54bdbbd4e3ad547fa457b5810df7c96f2d2c3bc6985e11202ffd1d42116889	5	historic JSON_checker provenance is not cleared for MIT/Apache-2.0 redistribution; upstream aggregate MIT notice is insufficient for these bytes
+test_parsing/n_number_invalid+-.json	25981c42fdd25646ab17d57bfaa65e4b2d7b791fdf13840e75c5a9e8f66dec70	7	historic JSON_checker provenance is not cleared for MIT/Apache-2.0 redistribution; upstream aggregate MIT notice is insufficient for these bytes
+test_parsing/n_string_single_quote.json	0389d0d5920ee2996811974bdcbfe05c9ca0ed79af909704b8485bc86f6eaf25	16	historic JSON_checker provenance is not cleared for MIT/Apache-2.0 redistribution; upstream aggregate MIT notice is insufficient for these bytes

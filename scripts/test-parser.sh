@@ -16,3 +16,10 @@ for test_program in \
 do
   "$project_root/tests/bin/$test_program"
 done
+
+for corpus_schedule in monolith one-byte randomized
+do
+  "$project_root/scripts/test-corpus-parser.sh" "$corpus_schedule"
+done
+
+"$project_root/scripts/test-corpus-work-guard.sh"
