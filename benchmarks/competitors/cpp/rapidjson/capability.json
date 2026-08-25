@@ -73,7 +73,7 @@
       "profile_ids": [],
       "output_policy_ids": [],
       "observable_result": "not available",
-      "limitations": ["No RapidJSON writer boundary is included."]
+      "limitations": ["No streaming writer boundary is included."]
     },
     {
       "lane": "write_dom",
