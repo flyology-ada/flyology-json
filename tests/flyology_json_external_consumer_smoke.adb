@@ -1,16 +1,86 @@
 with Ada.Streams;
+with Flyology_JSON.Destinations;
 with Flyology_JSON.Errors;
 with Flyology_JSON.Numbers.Signed_Integers;
 with Flyology_JSON.Numbers.Unsigned_Integers;
 with Flyology_JSON.Parsing;
 with Flyology_JSON.Profiles;
 with Flyology_JSON.Tokens;
+with Flyology_JSON.Writing;
 with Interfaces;
 
 procedure Flyology_JSON_External_Consumer_Smoke is
    package Errors renames Flyology_JSON.Errors;
    package Profiles renames Flyology_JSON.Profiles;
    package Tokens renames Flyology_JSON.Tokens;
+
+   subtype Count is Ada.Streams.Stream_Element_Count;
+   subtype Offset is Ada.Streams.Stream_Element_Offset;
+
+   use type Count;
+
+   type Writer_Destination is limited record
+      Storage   : Ada.Streams.Stream_Element_Array (80 .. 143);
+      Length    : Count := 0;
+      Active    : Boolean := False;
+      Published : Boolean := False;
+   end record;
+
+   procedure Writer_Begin
+     (Target : in out Writer_Destination;
+      Status : out Flyology_JSON.Destinations.Begin_Status)
+   is
+   begin
+      Target.Length := 0;
+      Target.Active := True;
+      Target.Published := False;
+      Status := Flyology_JSON.Destinations.Begin_Succeeded;
+   end Writer_Begin;
+
+   procedure Writer_Write
+     (Target  : in out Writer_Destination;
+      Data    : Ada.Streams.Stream_Element_Array;
+      Written : out Count;
+      Status  : out Flyology_JSON.Destinations.Write_Status)
+   is
+   begin
+      if Data'Length > 0 then
+         for Position in Count range 0 .. Data'Length - 1 loop
+            Target.Storage (Target.Storage'First + Offset (Target.Length + Position)) :=
+              Data (Data'First + Offset (Position));
+         end loop;
+      end if;
+      Target.Length := Target.Length + Data'Length;
+      Written := Data'Length;
+      Status := Flyology_JSON.Destinations.Write_Succeeded;
+   end Writer_Write;
+
+   procedure Writer_Commit
+     (Target : in out Writer_Destination;
+      Status : out Flyology_JSON.Destinations.Commit_Status)
+   is
+   begin
+      Target.Active := False;
+      Target.Published := True;
+      Status := Flyology_JSON.Destinations.Commit_Succeeded;
+   end Writer_Commit;
+
+   procedure Writer_Abort
+     (Target : in out Writer_Destination;
+      Status : out Flyology_JSON.Destinations.Abort_Status)
+   is
+   begin
+      Target.Active := False;
+      Target.Length := 0;
+      Status := Flyology_JSON.Destinations.Abort_Succeeded;
+   end Writer_Abort;
+
+   package Writing is new Flyology_JSON.Writing
+     (Destination_Type   => Writer_Destination,
+      Destination_Begin  => Writer_Begin,
+      Destination_Write  => Writer_Write,
+      Destination_Commit => Writer_Commit,
+      Destination_Abort  => Writer_Abort);
 
    package Parsing is new Flyology_JSON.Parsing (Profiles.Reject_Duplicates);
    package UInt32_JSON is new
@@ -20,7 +90,7 @@ procedure Flyology_JSON_External_Consumer_Smoke is
    package Int64_JSON is new
      Flyology_JSON.Numbers.Signed_Integers (Interfaces.Integer_64);
 
-   use type Ada.Streams.Stream_Element_Count;
+   use type Ada.Streams.Stream_Element_Array;
    use type Errors.Error_Code;
    use type Interfaces.Integer_64;
    use type Interfaces.Unsigned_32;
@@ -32,9 +102,7 @@ procedure Flyology_JSON_External_Consumer_Smoke is
    use type UInt32_JSON.Parse_Status;
    use type UInt64_JSON.Parse_Status;
    use type Int64_JSON.Parse_Status;
-
-   subtype Count is Ada.Streams.Stream_Element_Count;
-   subtype Offset is Ada.Streams.Stream_Element_Offset;
+   use type Writing.Writer_State;
 
    procedure Check (Condition : Boolean; Message : String) is
    begin
@@ -63,6 +131,11 @@ procedure Flyology_JSON_External_Consumer_Smoke is
       BOM           => Profiles.Reject_BOM,
       Duplicates    => Profiles.Reject_Duplicates,
       Top_Level     => Profiles.Accept_Any_Value);
+
+   Writer_Profile : constant Profiles.Writer_Profile :=
+     (Syntax     => (Family => Profiles.RFC_8259, Version => 1),
+      Unicode    => (Family => Profiles.Unicode_Scalars, Version => 1),
+      Formatting => (Policy => Profiles.Ordinary_Compact, Version => 1));
 
    Input : constant Ada.Streams.Stream_Element_Array :=
      To_Input ("[4294967295,18446744073709551615,-9223372036854775808]", -37);
@@ -194,4 +267,28 @@ begin
 
    Check (Used = Input'Length, "public parser did not consume the document");
    Check (Numbers_Seen = 3, "public parser did not expose every number");
+
+   declare
+      Target : aliased Writer_Destination;
+      Writer : Writing.Writer (Target'Access, Maximum_Depth => 1);
+      Name   : constant Ada.Streams.Stream_Element_Array := To_Input ("ok", -70);
+   begin
+      Writing.Initialize (Writer, Writer_Profile, Diagnostic);
+      Writing.Begin_Document (Writer, Diagnostic);
+      Writing.Begin_Object (Writer, Diagnostic);
+      Writing.Begin_Name (Writer, Diagnostic);
+      Writing.Put_Name_Fragment (Writer, Name, Diagnostic);
+      Writing.End_Name (Writer, Diagnostic);
+      Writing.Put_Boolean (Writer, True, Diagnostic);
+      Writing.End_Object (Writer, Diagnostic);
+      Writing.Finish_Document (Writer, Diagnostic);
+      Check (Diagnostic.Code = Errors.No_Error, "public writer failed from external project");
+      Check (Writing.State (Writer) = Writing.Completed, "public writer did not complete");
+      Check (Target.Published, "public writer did not commit external transaction");
+      Check (Target.Length = 11, "public writer external output length differs");
+      Check
+        (Target.Storage (Target.Storage'First .. Target.Storage'First + 10) =
+           To_Input ("{""ok"":true}", Target.Storage'First),
+         "public writer external output differs");
+   end;
 end Flyology_JSON_External_Consumer_Smoke;

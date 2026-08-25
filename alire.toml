@@ -14,7 +14,7 @@ gnat = ">=13 & <17"
 
 [[actions]]
 type = "test"
-command = ["./scripts/test-parser.sh"]
+command = ["./scripts/test-all.sh"]
 
 [build-switches]
 "*" = { Compile_Checks = "warnings" }

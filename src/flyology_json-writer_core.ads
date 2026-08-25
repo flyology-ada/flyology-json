@@ -1,4 +1,3 @@
-with Ada.Finalization;
 with Ada.Streams;
 with Flyology_JSON.Destinations;
 with Flyology_JSON.Errors;
@@ -23,7 +22,8 @@ private package Flyology_JSON.Writer_Core is
    subtype Coordinate_Kind is Errors.Coordinate_Kind;
    subtype Diagnostic is Errors.Diagnostic;
 
-   type Writer_State is (Uninitialized, Ready, Active, Completed, Failed, Aborted);
+   type Writer_State is
+     (Uninitialized, Ready, Active, Interrupted, Completed, Failed, Aborted);
 
    generic
       type Destination_Type is limited private;
@@ -53,6 +53,13 @@ private package Flyology_JSON.Writer_Core is
       is limited private;
 
       procedure Initialize (Self : in out Writer; Diagnostic : out Errors.Diagnostic);
+
+      --  Record public profile validation failure before destination begin.
+      --  Code is Unsupported_Profile or Incompatible_Profile.
+      procedure Reject_Profile
+        (Self       : in out Writer;
+         Code       : Errors.Error_Code;
+         Diagnostic : out Errors.Diagnostic);
 
       procedure Begin_Document (Self : in out Writer; Diagnostic : out Errors.Diagnostic);
 
@@ -90,10 +97,14 @@ private package Flyology_JSON.Writer_Core is
       procedure Abort_Document (Self : in out Writer; Diagnostic : out Errors.Diagnostic);
       procedure Reset (Self : in out Writer; Diagnostic : out Errors.Diagnostic);
 
+      --  Explicit nonraising cleanup for the sole controlled public owner.
+      --  It aborts one owned unpublished transaction at most once.
+      procedure Cleanup (Self : in out Writer);
+
       function State (Self : Writer) return Writer_State;
 
       function Terminal_Diagnostic (Self : Writer) return Errors.Diagnostic
-      with Pre => State (Self) in Failed | Aborted;
+      with Pre => State (Self) in Interrupted | Failed | Aborted;
 
       --  Private-parent test seam for otherwise unreachable 64-bit boundary
       --  fixtures. It is never re-exported by the public writer.
@@ -129,7 +140,7 @@ private package Flyology_JSON.Writer_Core is
       type Writer
         (Target        : not null access Destination_Type;
          Maximum_Depth : Natural)
-      is new Ada.Finalization.Limited_Controlled with record
+      is limited record
          Current_State         : Writer_State := Uninitialized;
          --  Keep this valid from object elaboration onward.  An abnormal
          --  transfer can finalize the per-call cleanup guard before the
@@ -143,6 +154,9 @@ private package Flyology_JSON.Writer_Core is
             Secondary_Offset     => 0);
          Owns_Transaction      : Boolean := False;
          Abort_Attempted       : Boolean := False;
+         In_Call               : Boolean := False with Atomic;
+         Primary_Valid         : Boolean := False with Atomic;
+         Interrupted_Ordinal   : Byte_Offset := 0;
          Next_Staged_Offset     : Byte_Offset := 0;
          Next_Token_Offset      : Byte_Offset := 0;
          Next_Call_Ordinal      : Byte_Offset := 0;
@@ -155,8 +169,6 @@ private package Flyology_JSON.Writer_Core is
          UTF8_Lead_Offset      : Byte_Offset := 0;
          Number                : Parser_Numbers.Number_State;
       end record;
-
-      overriding procedure Finalize (Self : in out Writer);
 
    end Destination_Writers;
 

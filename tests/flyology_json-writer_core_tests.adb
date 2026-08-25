@@ -279,6 +279,122 @@ procedure Flyology_JSON.Writer_Core_Tests is
       Check_Output (Target, Expected);
    end Test_Ordinary_Compact;
 
+   procedure Test_Escape_Batch_Boundaries is
+      procedure Run
+        (Short_Escapes   : Positive;
+         Add_Raw         : Boolean;
+         Escape          : Ada.Streams.Stream_Element;
+         As_Name         : Boolean;
+         First           : Offset;
+         Expected_Octets : Count)
+      is
+         Input : Ada.Streams.Stream_Element_Array
+           (First .. First + Offset (Short_Escapes + Boolean'Pos (Add_Raw) - 1));
+         Target     : aliased Test_Destination;
+         Writer     : Writers.Writer
+           (Target'Access, Maximum_Depth => (if As_Name then 1 else 0));
+         Diagnostic : Core.Diagnostic;
+         Expected : Ada.Streams.Stream_Element_Array
+           (1 .. Offset (Expected_Octets + (if As_Name then 9 else 2)));
+         Cursor : Count := 0;
+
+         procedure Add (Item : Ada.Streams.Stream_Element) is
+         begin
+            Expected (Expected'First + Offset (Cursor)) := Item;
+            Cursor := Cursor + 1;
+         end Add;
+      begin
+         for Position in 0 .. Short_Escapes - 1 loop
+            Input (First + Offset (Position)) := Escape;
+         end loop;
+         if Add_Raw then
+            Input (Input'Last) := Character'Pos ('a');
+         end if;
+
+         Writers.Initialize (Writer, Diagnostic);
+         Writers.Begin_Document (Writer, Diagnostic);
+         if As_Name then
+            Writers.Begin_Object (Writer, Diagnostic);
+            Writers.Begin_Name (Writer, Diagnostic);
+            Writers.Put_Name_Fragment (Writer, Input, Diagnostic);
+         else
+            Writers.Begin_String (Writer, Diagnostic);
+            Writers.Put_String_Fragment (Writer, Input, Diagnostic);
+         end if;
+         Check_Clear (Diagnostic, "escape batch boundary fragment failed");
+         if As_Name then
+            Writers.End_Name (Writer, Diagnostic);
+            Writers.Put_Null (Writer, Diagnostic);
+            Writers.End_Object (Writer, Diagnostic);
+         else
+            Writers.End_String (Writer, Diagnostic);
+         end if;
+         Writers.Finish_Document (Writer, Diagnostic);
+         Check_Clear (Diagnostic, "escape batch boundary document failed");
+
+         if As_Name then
+            Add (Character'Pos ('{'));
+         end if;
+         Add (Character'Pos ('"'));
+         for Position in 1 .. Short_Escapes loop
+            Add (Character'Pos ('\'));
+            Add ((if Escape = 16#0A# then Character'Pos ('n') else Escape));
+         end loop;
+         if Add_Raw then
+            Add (Character'Pos ('a'));
+         end if;
+         Add (Character'Pos ('"'));
+         if As_Name then
+            Add (Character'Pos (':'));
+            Add (Character'Pos ('n'));
+            Add (Character'Pos ('u'));
+            Add (Character'Pos ('l'));
+            Add (Character'Pos ('l'));
+            Add (Character'Pos ('}'));
+         end if;
+         Check (Cursor = Expected'Length, "escape batch expected output length differs");
+         Check_Output (Target, Expected);
+      end Run;
+
+      Input      : Ada.Streams.Stream_Element_Array (-500 .. -372);
+      Target     : aliased Test_Destination;
+      Writer     : Writers.Writer (Target'Access, Maximum_Depth => 0);
+      Diagnostic : Core.Diagnostic;
+   begin
+      Run
+        (127, True, Character'Pos ('"'), False, First => -300, Expected_Octets => 255);
+      Run
+        (128, False, Character'Pos ('\'), False, First => 700, Expected_Octets => 256);
+      Run
+        (128, True, Character'Pos ('"'), False, First => -500, Expected_Octets => 257);
+      Run
+        (128, True, Character'Pos ('\'), True, First => 900, Expected_Octets => 257);
+      Run
+        (128, True, 16#0A#, False, First => -900, Expected_Octets => 257);
+
+      for Position in Input'First .. Input'Last - 1 loop
+         Input (Position) := Character'Pos ('"');
+      end loop;
+      Input (Input'Last) := Character'Pos ('a');
+      Target.Capacity := 257;
+      Writers.Initialize (Writer, Diagnostic);
+      Writers.Begin_Document (Writer, Diagnostic);
+      Writers.Begin_String (Writer, Diagnostic);
+      Writers.Put_String_Fragment (Writer, Input, Diagnostic);
+      Check
+        (Diagnostic.Code = Errors.Destination_Exhausted,
+         "escape batch boundary exhaustion was missed");
+      Check
+        (Diagnostic.Coordinate = Errors.Staged_Output_Byte and then Diagnostic.Offset = 257,
+         "escape batch boundary exhaustion coordinate differs");
+      Check (Target.Abort_Calls = 1, "escape batch boundary exhaustion did not abort once");
+      Check (not Target.Published, "escape batch boundary exhaustion published output");
+      Check (Writers.State (Writer) = Core.Failed, "escape batch boundary failure state differs");
+      Check
+        (Writers.Terminal_Diagnostic (Writer) = Diagnostic,
+         "escape batch boundary failure diagnostic was not retained");
+   end Test_Escape_Batch_Boundaries;
+
    procedure Test_Depth_And_Grammar is
       Target     : aliased Test_Destination;
       Writer     : Writers.Writer (Target'Access, Maximum_Depth => 1);
@@ -635,7 +751,7 @@ procedure Flyology_JSON.Writer_Core_Tests is
       end loop;
    end Test_Ordered_Failure_Precedence;
 
-   procedure Test_Begin_Abort_Finalize is
+   procedure Test_Begin_Abort_Cleanup is
       Target     : aliased Test_Destination;
       Diagnostic : Core.Diagnostic;
    begin
@@ -646,6 +762,7 @@ procedure Flyology_JSON.Writer_Core_Tests is
          Writers.Initialize (Writer, Diagnostic);
          Writers.Begin_Document (Writer, Diagnostic);
          Check (Diagnostic.Code = Errors.Destination_Failed, "begin failure code differs");
+         Writers.Cleanup (Writer);
       end;
       Check (Target.Abort_Calls = 0, "failed begin incorrectly aborted");
 
@@ -655,8 +772,9 @@ procedure Flyology_JSON.Writer_Core_Tests is
       begin
          Writers.Initialize (Writer, Diagnostic);
          Writers.Begin_Document (Writer, Diagnostic);
+         Writers.Cleanup (Writer);
       end;
-      Check (Target.Abort_Calls = 1, "finalization did not abort owned transaction");
+      Check (Target.Abort_Calls = 1, "explicit cleanup did not abort owned transaction");
 
       declare
          Writer : Writers.Writer (Target'Access, Maximum_Depth => 0);
@@ -665,9 +783,10 @@ procedure Flyology_JSON.Writer_Core_Tests is
          Writers.Begin_Document (Writer, Diagnostic);
          Writers.Abort_Document (Writer, Diagnostic);
          Writers.Abort_Document (Writer, Diagnostic);
+         Writers.Cleanup (Writer);
       end;
       Check (Target.Abort_Calls = 2, "explicit abort was not exactly once");
-   end Test_Begin_Abort_Finalize;
+   end Test_Begin_Abort_Cleanup;
 
    procedure Test_Task_Abort_Transfers is
       Target     : aliased Test_Destination;
@@ -713,15 +832,14 @@ procedure Flyology_JSON.Writer_Core_Tests is
          abort Worker;
       end;
       Target.Pause_Begin := False;
-      Check (Writers.State (Writer) = Core.Aborted, "task-aborted begin was not sealed terminal");
-      Check (not Target.Active, "task-aborted begin leaked destination ownership");
+      Check (Writers.State (Writer) = Core.Active, "task-aborted begin lost coherent ownership");
+      Check (Target.Active, "task-aborted begin lost its abortable transaction");
       Check (Target.Begin_Calls = 1, "aborted begin call count differs");
-      Check (Target.Abort_Calls = 1, "task-aborted begin did not clean up exactly once");
-      Check_Clear
-        (Writers.Terminal_Diagnostic (Writer),
-         "task-aborted begin did not retain a cleared diagnostic");
+      Check (Target.Abort_Calls = 0, "task-aborted begin cleaned up before owner request");
       Writers.Abort_Document (Writer, Diagnostic);
-      Check (Target.Abort_Calls = 1, "task-aborted begin cleaned up twice");
+      Check (Writers.State (Writer) = Core.Aborted, "task-aborted begin did not abort explicitly");
+      Check (Target.Abort_Calls = 1, "task-aborted begin did not clean up exactly once");
+      Check_Clear (Writers.Terminal_Diagnostic (Writer), "clean boundary abort retained an error");
 
       --  A failed begin records failure without inventing ownership or an
       --  abort obligation when task abort is pending at the return edge.
@@ -744,12 +862,14 @@ procedure Flyology_JSON.Writer_Core_Tests is
       end;
       Target.Pause_Begin := False;
       Target.Fail_Begin := False;
-      Check (Writers.State (Writer) = Core.Aborted, "aborted failed begin was not sealed terminal");
+      Check (Writers.State (Writer) = Core.Failed, "aborted failed begin lost its failure state");
       Check (not Target.Active, "aborted failed begin invented destination ownership");
       Check (Target.Abort_Calls = Before, "aborted failed begin incorrectly called abort");
       Check
         (Writers.Terminal_Diagnostic (Writer).Code = Errors.Destination_Failed,
          "aborted failed begin lost its primary diagnostic");
+      Writers.Abort_Document (Writer, Diagnostic);
+      Check (Writers.State (Writer) = Core.Failed, "failed begin abort changed retained state");
 
       --  A successful commit publishes and records Completed before the
       --  pending task abort can take effect.
@@ -802,7 +922,7 @@ procedure Flyology_JSON.Writer_Core_Tests is
       end;
       Target.Pause_Commit := False;
       Target.Fail_Commit := False;
-      Check (Writers.State (Writer) = Core.Aborted, "aborted failed commit was not sealed terminal");
+      Check (Writers.State (Writer) = Core.Failed, "aborted failed commit lost its failure state");
       Check (Target.Abort_Calls = Before + 1, "aborted failed commit did not clean up exactly once");
       Check (not Target.Active, "aborted failed commit leaked destination ownership");
       Check (not Target.Published, "aborted failed commit falsely published");
@@ -880,14 +1000,25 @@ procedure Flyology_JSON.Writer_Core_Tests is
          Context : String)
       is
          Diagnostic  : Core.Diagnostic;
-         Write_Calls : constant Natural := Target.Write_Calls;
+         Write_Calls : Natural;
       begin
+         Check (Writers.State (Writer) = Core.Interrupted, Context & " did not expose Interrupted");
+         Check (Target.Abort_Calls = Before, Context & " aborted before the owner requested cleanup");
+         Check
+           (Writers.Terminal_Diagnostic (Writer).Code = Errors.Writer_Interrupted,
+            Context & " did not synthesize the interruption primary");
+         Check
+           (Writers.Terminal_Diagnostic (Writer).Coordinate = Errors.JSON_Call_Ordinal,
+            Context & " interruption coordinate differs");
+         Writers.Abort_Document (Writer, Diagnostic);
          Check (Writers.State (Writer) = Core.Aborted, Context & " did not reach Aborted");
          Check (Target.Abort_Calls = Before + 1, Context & " did not abort exactly once");
          Check (not Target.Active, Context & " leaked destination ownership");
          Check (not Target.Published, Context & " published output");
-         Check_Clear
-           (Writers.Terminal_Diagnostic (Writer), Context & " did not retain a cleared diagnostic");
+         Check
+           (Writers.Terminal_Diagnostic (Writer).Code = Errors.Writer_Interrupted,
+            Context & " did not retain the interruption primary");
+         Write_Calls := Target.Write_Calls;
          Writers.Put_Null (Writer, Diagnostic);
          Check (Writers.State (Writer) = Core.Aborted, Context & " allowed continuation");
          Check (Target.Write_Calls = Write_Calls, Context & " continuation wrote output");
@@ -1049,13 +1180,14 @@ procedure Flyology_JSON.Writer_Core_Tests is
 
 begin
    Test_Ordinary_Compact;
+   Test_Escape_Batch_Boundaries;
    Test_Depth_And_Grammar;
    Test_Invalid_UTF8_And_Number;
    Test_Destination_Failures;
    Test_Grammar_And_Truncation;
    Test_Offset_Boundaries;
    Test_Ordered_Failure_Precedence;
-   Test_Begin_Abort_Finalize;
+   Test_Begin_Abort_Cleanup;
    Test_Task_Abort_Transfers;
    Test_Task_Abort_Mutating_Calls;
 end Flyology_JSON.Writer_Core_Tests;

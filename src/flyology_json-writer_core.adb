@@ -1,3 +1,6 @@
+with Ada.Exceptions;
+with Ada.Finalization;
+
 package body Flyology_JSON.Writer_Core is
 
    package body Destination_Writers is
@@ -44,111 +47,119 @@ package body Flyology_JSON.Writer_Core is
          Secondary_Coordinate => No_Coordinate,
          Secondary_Offset     => 0);
 
-      procedure Add_Abort_Secondary (Self : in out Writer) is
+      function Interrupted_Diagnostic (Self : Writer) return Writer_Core.Diagnostic is
+        (Make_Diagnostic
+           (Writer_Interrupted, JSON_Call_Ordinal, Self.Interrupted_Ordinal));
+
+      procedure Publish_Primary
+        (Self : in out Writer; Item : Writer_Core.Diagnostic)
+      is
+      begin
+         if not Self.Primary_Valid then
+            Self.Last_Diagnostic := Item;
+            Self.Primary_Valid := True;
+         end if;
+      end Publish_Primary;
+
+      procedure Add_Abort_Secondary
+        (Self : in out Writer; Unknown_Staged_Prefix : Boolean)
+      is
       begin
          Self.Last_Diagnostic.Secondary := Abort_Failed;
-         Self.Last_Diagnostic.Secondary_Coordinate := Staged_Output_Byte;
-         Self.Last_Diagnostic.Secondary_Offset := Self.Next_Staged_Offset;
+         if Unknown_Staged_Prefix then
+            Self.Last_Diagnostic.Secondary_Coordinate := No_Coordinate;
+            Self.Last_Diagnostic.Secondary_Offset := 0;
+         else
+            Self.Last_Diagnostic.Secondary_Coordinate := Staged_Output_Byte;
+            Self.Last_Diagnostic.Secondary_Offset := Self.Next_Staged_Offset;
+         end if;
       end Add_Abort_Secondary;
 
+      procedure Run_Boundary (Action : not null access procedure) is
+         Saved  : Ada.Exceptions.Exception_Occurrence;
+         Raised : Boolean := False;
+
+         type Transfer_Guard is new Ada.Finalization.Limited_Controlled with record
+            Armed : Boolean := False with Atomic;
+         end record;
+
+         overriding procedure Finalize (Guard : in out Transfer_Guard) is
+         begin
+            if Guard.Armed then
+               Guard.Armed := False;
+               begin
+                  Action.all;
+               exception
+                  when Occurrence : others =>
+                     Ada.Exceptions.Save_Occurrence (Saved, Occurrence);
+                     Raised := True;
+               end;
+            end if;
+         end Finalize;
+      begin
+         declare
+            Transfer : Transfer_Guard;
+            pragma Unreferenced (Transfer);
+         begin
+            --  Everything needed by Finalize is initialized before this first
+            --  atomic effect. An abnormal transfer before it starts no
+            --  boundary operation; one after it invokes Finalize.
+            Transfer.Armed := True;
+         end;
+
+         if Raised then
+            Ada.Exceptions.Reraise_Occurrence (Saved);
+         end if;
+      end Run_Boundary;
+
       procedure Abort_Owned_Transaction
-        (Self : in out Writer; Final_State : Writer_State)
+        (Self                  : in out Writer;
+         Final_State           : Writer_State;
+         Unknown_Staged_Prefix : Boolean := False)
       is
+         procedure Perform is
+            Status : Abort_Status;
+         begin
+            Self.Abort_Attempted := True;
+            Destination_Abort (Self.Target.all, Status);
+            Self.Owns_Transaction := False;
+
+            if Status = Abort_Failed then
+               if not Self.Primary_Valid then
+                  Publish_Primary
+                    (Self,
+                     Make_Diagnostic
+                       (Abort_Failed, Staged_Output_Byte, Self.Next_Staged_Offset));
+               else
+                  Add_Abort_Secondary (Self, Unknown_Staged_Prefix);
+               end if;
+            end if;
+            Self.Current_State := Final_State;
+         end Perform;
       begin
          if not Self.Owns_Transaction or else Self.Abort_Attempted then
             Self.Current_State := Final_State;
             return;
          end if;
 
-         declare
-            --  Ada RM 9.8 makes Initialize abort-deferred. Keep the destination
-            --  call and both ownership transitions inside that portable
-            --  language-defined region; there is no tasking check on writes.
-            type Abort_Transfer is new Ada.Finalization.Limited_Controlled with null record;
-
-            overriding procedure Initialize (Guard : in out Abort_Transfer) is
-               pragma Unreferenced (Guard);
-               Status : Abort_Status;
-            begin
-               Self.Abort_Attempted := True;
-               Destination_Abort (Self.Target.all, Status);
-               Self.Owns_Transaction := False;
-
-               if Status = Abort_Failed then
-                  if Self.Last_Diagnostic.Code = No_Error then
-                     Self.Last_Diagnostic :=
-                       Make_Diagnostic
-                         (Abort_Failed, Staged_Output_Byte, Self.Next_Staged_Offset);
-                  else
-                     Add_Abort_Secondary (Self);
-                  end if;
-               end if;
-               Self.Current_State := Final_State;
-            end Initialize;
-
-            Transfer : Abort_Transfer;
-            pragma Unreferenced (Transfer);
-         begin
-            null;
-         end;
+         Run_Boundary (Perform'Access);
       end Abort_Owned_Transaction;
 
       procedure Fail
         (Self : in out Writer; Item : Writer_Core.Diagnostic; Diagnostic : out Writer_Core.Diagnostic)
       is
       begin
-         if Self.Last_Diagnostic.Code = No_Error then
-            Self.Last_Diagnostic := Item;
-         end if;
+         Publish_Primary (Self, Item);
          Abort_Owned_Transaction (Self, Failed);
          Diagnostic := Self.Last_Diagnostic;
       end Fail;
 
-      procedure Run_Abort_Deferred
-        (Self : in out Writer; Action : not null access procedure)
-      is
-         Completed_Normally : Boolean := False with Volatile;
-
-         type Cleanup_Guard is new Ada.Finalization.Limited_Controlled with null record;
-
-         overriding procedure Finalize (Guard : in out Cleanup_Guard) is
-            pragma Unreferenced (Guard);
-         begin
-            if not Completed_Normally
-              and then Self.Current_State not in Completed | Aborted
-            then
-               --  Finalize is abort-deferred by Ada RM 9.8. Preserve any
-               --  established primary diagnostic while making continuation
-               --  and later commit impossible.
-               Abort_Owned_Transaction (Self, Aborted);
-            end if;
-         end Finalize;
-
-         Cleanup : Cleanup_Guard;
-         pragma Unreferenced (Cleanup);
-
-         type Call_Transfer is new Ada.Finalization.Limited_Controlled with null record;
-
-         overriding procedure Initialize (Transfer : in out Call_Transfer) is
-            pragma Unreferenced (Transfer);
-         begin
-            --  This is the complete admitted operation. Abort deferral adds no
-            --  check or dispatch inside its scanner or destination-write loop.
-            Action.all;
-         end Initialize;
-
-         Transfer : Call_Transfer;
-         pragma Unreferenced (Transfer);
-      begin
-         --  A task abort requested during Action is delivered when its
-         --  abort-deferred Initialize ends, before this marker can execute.
-         Completed_Normally := True;
-      end Run_Abort_Deferred;
-
       procedure Reject_State (Self : Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         if Self.Current_State in Failed | Aborted and then Self.Last_Diagnostic.Code /= No_Error then
+         if Self.Primary_Valid then
             Diagnostic := Self.Last_Diagnostic;
+         elsif Self.In_Call then
+            Diagnostic := Interrupted_Diagnostic (Self);
          else
             Diagnostic := Make_Diagnostic (Invalid_State, No_Coordinate, 0);
          end if;
@@ -223,7 +234,7 @@ package body Flyology_JSON.Writer_Core is
            (if Length <= Room then Data'Length else Count (Room));
          Destination_Write
            (Self.Target.all,
-            Data (Data'First .. Data'First + Offset (Offered) - 1),
+            Data (Data'First .. Data'First + Offset (Offered - 1)),
             Written,
             Status);
 
@@ -343,42 +354,10 @@ package body Flyology_JSON.Writer_Core is
       function Needs_Escape (Value : Element) return Boolean is
         (Value = Quote or else Value = Reverse_Solidus or else Value <= Control_Last);
 
-      procedure Emit_Escape
-        (Self       : in out Writer;
-         Value      : Element;
-         Succeeded  : out Boolean;
-         Diagnostic : out Writer_Core.Diagnostic)
-      is
-         Buffer : Ada.Streams.Stream_Element_Array (1 .. 6);
-         Length : Offset;
-
-         function Hex_Digit (Nibble : Element) return Element is
-           (if Nibble < 10
-            then Character'Pos ('0') + Nibble
-            else Character'Pos ('A') + Nibble - 10);
-      begin
-         Buffer (1) := Reverse_Solidus;
-         Length := 2;
-
-         case Value is
-            when 16#08# => Buffer (2) := Character'Pos ('b');
-            when 16#09# => Buffer (2) := Character'Pos ('t');
-            when 16#0A# => Buffer (2) := Character'Pos ('n');
-            when 16#0C# => Buffer (2) := Character'Pos ('f');
-            when 16#0D# => Buffer (2) := Character'Pos ('r');
-            when Quote  => Buffer (2) := Quote;
-            when Reverse_Solidus => Buffer (2) := Reverse_Solidus;
-            when others =>
-               Length := 6;
-               Buffer (2) := Character'Pos ('u');
-               Buffer (3) := Character'Pos ('0');
-               Buffer (4) := Character'Pos ('0');
-               Buffer (5) := Hex_Digit (Value / 16);
-               Buffer (6) := Hex_Digit (Value mod 16);
-         end case;
-
-         Emit (Self, Buffer (1 .. Length), Succeeded, Diagnostic);
-      end Emit_Escape;
+      function Hex_Digit (Nibble : Element) return Element is
+        (if Nibble < 10
+         then Character'Pos ('0') + Nibble
+         else Character'Pos ('A') + Nibble - 10);
 
       procedure Emit_Text
         (Self       : in out Writer;
@@ -393,23 +372,135 @@ package body Flyology_JSON.Writer_Core is
          Run_First_Count : Count := 0;
          Probe           : Parser_UTF8.Decoder := Self.UTF8;
          Probe_Lead      : Byte_Offset := Self.UTF8_Lead_Offset;
+         Probe_Pending   : Boolean := Parser_UTF8.Has_Pending_Octets (Probe);
          Result          : Parser_UTF8.Feed_Result;
+         --  Private implementation scratch, not a public destination or token
+         --  capacity. Large raw spans bypass it; escape-heavy spans amortize
+         --  destination calls without allocation.
+         Escape_Batch_Octets : constant Count := 256;
+         Scratch : Ada.Streams.Stream_Element_Array
+           (1 .. Offset (Escape_Batch_Octets));
+         Scratch_Length : Count := 0;
 
-         procedure Flush_Run (Exclusive_Last : Count) is
+         procedure Flush_Scratch is
          begin
-            if Exclusive_Last > Run_First_Count then
+            if Scratch_Length > 0 then
                Emit
                  (Self,
-                  Value
-                    (Value'First + Offset (Run_First_Count)
-                     .. Value'First + Offset (Exclusive_Last) - 1),
+                  Scratch (Scratch'First .. Scratch'First + Offset (Scratch_Length - 1)),
                   Succeeded,
                   Diagnostic);
+               if Succeeded then
+                  Scratch_Length := 0;
+               end if;
             else
                Succeeded := True;
                Diagnostic := Clear_Diagnostic;
             end if;
-         end Flush_Run;
+         end Flush_Scratch;
+
+         procedure Append_Run
+           (First_Count : Count; Exclusive_Last : Count)
+         is
+            Cursor    : Count := First_Count;
+            Remaining : Count;
+            Available : Count;
+            Copied    : Count;
+         begin
+            while Cursor < Exclusive_Last loop
+               Remaining := Exclusive_Last - Cursor;
+               if Scratch_Length = 0 and then Remaining >= Escape_Batch_Octets then
+                  Emit
+                    (Self,
+                     Value
+                       (Value'First + Offset (Cursor)
+                        .. Value'First + Offset (Exclusive_Last - 1)),
+                     Succeeded,
+                     Diagnostic);
+                  return;
+               end if;
+
+               Available := Escape_Batch_Octets - Scratch_Length;
+               Copied := Count'Min (Remaining, Available);
+               for Item in Count range 0 .. Copied - 1 loop
+                  Scratch (Scratch'First + Offset (Scratch_Length + Item)) :=
+                    Value (Value'First + Offset (Cursor + Item));
+               end loop;
+               Scratch_Length := Scratch_Length + Copied;
+               Cursor := Cursor + Copied;
+
+               if Scratch_Length = Escape_Batch_Octets then
+                  Flush_Scratch;
+                  if not Succeeded then
+                     return;
+                  end if;
+               end if;
+            end loop;
+            Succeeded := True;
+            Diagnostic := Clear_Diagnostic;
+         end Append_Run;
+
+         procedure Append_Escape (Value : Element) is
+            Encoded_Length : Count := 2;
+         begin
+            if Value not in 16#08# | 16#09# | 16#0A# | 16#0C# | 16#0D#
+              and then Value /= Quote
+              and then Value /= Reverse_Solidus
+            then
+               Encoded_Length := 6;
+            end if;
+
+            if Escape_Batch_Octets - Scratch_Length < Encoded_Length then
+               Flush_Scratch;
+               if not Succeeded then
+                  return;
+               end if;
+            end if;
+
+            Scratch_Length := Scratch_Length + 1;
+            Scratch (Scratch'First + Offset (Scratch_Length - 1)) := Reverse_Solidus;
+            Scratch_Length := Scratch_Length + 1;
+            case Value is
+               when 16#08# =>
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) :=
+                    Character'Pos ('b');
+               when 16#09# =>
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) :=
+                    Character'Pos ('t');
+               when 16#0A# =>
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) :=
+                    Character'Pos ('n');
+               when 16#0C# =>
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) :=
+                    Character'Pos ('f');
+               when 16#0D# =>
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) :=
+                    Character'Pos ('r');
+               when Quote | Reverse_Solidus =>
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) := Value;
+               when others =>
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) :=
+                    Character'Pos ('u');
+                  Scratch_Length := Scratch_Length + 1;
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) :=
+                    Character'Pos ('0');
+                  Scratch_Length := Scratch_Length + 1;
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) :=
+                    Character'Pos ('0');
+                  Scratch_Length := Scratch_Length + 1;
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) :=
+                    Hex_Digit (Value / 16);
+                  Scratch_Length := Scratch_Length + 1;
+                  Scratch (Scratch'First + Offset (Scratch_Length - 1)) :=
+                    Hex_Digit (Value mod 16);
+            end case;
+            if Scratch_Length = Escape_Batch_Octets then
+               Flush_Scratch;
+               return;
+            end if;
+            Succeeded := True;
+            Diagnostic := Clear_Diagnostic;
+         end Append_Escape;
       begin
          if Value'Length = 0 then
             Succeeded := True;
@@ -430,40 +521,50 @@ package body Flyology_JSON.Writer_Core is
             else Count (Token_Room));
 
          while Position < Limit loop
-            if not Parser_UTF8.Has_Pending_Octets (Probe) then
+            if not Probe_Pending then
                Probe_Lead := Base_Token + Byte_Offset (Position);
             end if;
 
-            Parser_UTF8.Feed
-              (Probe, Value (Value'First + Offset (Position)), Result);
-            if Result.Status = Parser_UTF8.Invalid then
-               Flush_Run (Position);
+            --  ASCII is already a complete Unicode scalar. Keep the common
+            --  unescaped path inside this scanner instead of calling the
+            --  incremental UTF-8 state machine for every octet.
+            if Probe_Pending
+              or else Value (Value'First + Offset (Position)) >= 16#80#
+            then
+               Parser_UTF8.Feed
+                 (Probe, Value (Value'First + Offset (Position)), Result);
+               Probe_Pending := Result.Status = Parser_UTF8.Need_More;
+               if Result.Status = Parser_UTF8.Invalid then
+                  Append_Run (Run_First_Count, Position);
+                  if not Succeeded then
+                     return;
+                  end if;
+                  Flush_Scratch;
+                  if not Succeeded then
+                     return;
+                  end if;
+
+                  Fail
+                    (Self,
+                     Make_Diagnostic
+                       (Invalid_UTF8,
+                        Writer_Token_Byte,
+                        (if Result.Blame = Parser_UTF8.Stored_Lead_Octet
+                         then Probe_Lead
+                         else Base_Token + Byte_Offset (Position))),
+                     Diagnostic);
+                  Succeeded := False;
+                  return;
+               end if;
+            end if;
+
+            if Needs_Escape (Value (Value'First + Offset (Position))) then
+               Append_Run (Run_First_Count, Position);
                if not Succeeded then
                   return;
                end if;
 
-               Fail
-                 (Self,
-                  Make_Diagnostic
-                    (Invalid_UTF8,
-                     Writer_Token_Byte,
-                     (if Result.Blame = Parser_UTF8.Stored_Lead_Octet
-                      then Probe_Lead
-                      else Base_Token + Byte_Offset (Position))),
-                  Diagnostic);
-               Succeeded := False;
-               return;
-            elsif Needs_Escape (Value (Value'First + Offset (Position))) then
-               Flush_Run (Position);
-               if not Succeeded then
-                  return;
-               end if;
-
-               Emit_Escape
-                 (Self,
-                  Value (Value'First + Offset (Position)),
-                  Succeeded,
-                  Diagnostic);
+               Append_Escape (Value (Value'First + Offset (Position)));
                if not Succeeded then
                   return;
                end if;
@@ -472,7 +573,11 @@ package body Flyology_JSON.Writer_Core is
             Position := Position + 1;
          end loop;
 
-         Flush_Run (Position);
+         Append_Run (Run_First_Count, Position);
+         if not Succeeded then
+            return;
+         end if;
+         Flush_Scratch;
          if not Succeeded then
             return;
          elsif Position < Value'Length then
@@ -499,6 +604,9 @@ package body Flyology_JSON.Writer_Core is
 
          Self.Current_State := Ready;
          Self.Last_Diagnostic := Clear_Diagnostic;
+         Self.Primary_Valid := False;
+         Self.In_Call := False;
+         Self.Interrupted_Ordinal := 0;
          Self.Owns_Transaction := False;
          Self.Abort_Attempted := False;
          Self.Next_Staged_Offset := 0;
@@ -513,11 +621,45 @@ package body Flyology_JSON.Writer_Core is
          Diagnostic := Clear_Diagnostic;
       end Initialize_Impl;
 
+      procedure Reject_Profile_Impl
+        (Self       : in out Writer;
+         Code       : Error_Code;
+         Diagnostic : out Writer_Core.Diagnostic)
+      is
+      begin
+         if Self.In_Call
+           or else Self.Current_State not in Uninitialized | Completed | Failed | Aborted
+         then
+            Reject_State (Self, Diagnostic);
+            return;
+         end if;
+
+         Self.Current_State := Failed;
+         Self.Last_Diagnostic := Clear_Diagnostic;
+         Self.Primary_Valid := False;
+         Self.In_Call := False;
+         Self.Interrupted_Ordinal := 0;
+         Self.Owns_Transaction := False;
+         Self.Abort_Attempted := False;
+         Self.Next_Staged_Offset := 0;
+         Self.Next_Token_Offset := 0;
+         Self.Next_Call_Ordinal := 0;
+         Self.Depth := 0;
+         Self.Root_Started := False;
+         Self.Root_Complete := False;
+         Self.Token := No_Token;
+         Parser_UTF8.Reset (Self.UTF8);
+         Parser_Numbers.Reset (Self.Number);
+         Publish_Primary (Self, Make_Diagnostic (Code, No_Coordinate, 0));
+         Diagnostic := Self.Last_Diagnostic;
+      end Reject_Profile_Impl;
+
       procedure Begin_Document_Impl (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
          Ordinal  : Byte_Offset;
          Reserved : Boolean;
+         Status   : Begin_Status;
       begin
-         if Self.Current_State /= Ready then
+         if Self.Current_State not in Ready | Active then
             Reject_State (Self, Diagnostic);
             return;
          end if;
@@ -526,36 +668,24 @@ package body Flyology_JSON.Writer_Core is
          if not Reserved then
             return;
          end if;
-         pragma Unreferenced (Ordinal);
 
-         declare
-            --  Initialize is abort-deferred by Ada RM 9.8, so no task abort
-            --  can land between destination ownership and the writer record.
-            type Begin_Transfer is new Ada.Finalization.Limited_Controlled with null record;
+         if Self.Current_State = Active then
+            Grammar_Failure (Self, Ordinal, Diagnostic);
+            return;
+         end if;
 
-            overriding procedure Initialize (Guard : in out Begin_Transfer) is
-               pragma Unreferenced (Guard);
-               Status : Begin_Status;
-            begin
-               Destination_Begin (Self.Target.all, Status);
-               if Status = Begin_Succeeded then
-                  Self.Current_State := Active;
-                  Self.Owns_Transaction := True;
-                  Self.Abort_Attempted := False;
-                  Diagnostic := Clear_Diagnostic;
-               else
-                  Self.Last_Diagnostic :=
-                    Make_Diagnostic (Destination_Failed, Staged_Output_Byte, 0);
-                  Self.Current_State := Failed;
-                  Diagnostic := Self.Last_Diagnostic;
-               end if;
-            end Initialize;
-
-            Transfer : Begin_Transfer;
-            pragma Unreferenced (Transfer);
-         begin
-            null;
-         end;
+         Destination_Begin (Self.Target.all, Status);
+         if Status = Begin_Succeeded then
+            Self.Current_State := Active;
+            Self.Owns_Transaction := True;
+            Self.Abort_Attempted := False;
+            Diagnostic := Clear_Diagnostic;
+         else
+            Publish_Primary
+              (Self, Make_Diagnostic (Destination_Failed, Staged_Output_Byte, 0));
+            Self.Current_State := Failed;
+            Diagnostic := Self.Last_Diagnostic;
+         end if;
       end Begin_Document_Impl;
 
       procedure Begin_Container
@@ -898,7 +1028,7 @@ package body Flyology_JSON.Writer_Core is
             if Position > 0 then
                Emit
                  (Self,
-                  Value (Value'First .. Value'First + Offset (Position) - 1),
+                  Value (Value'First .. Value'First + Offset (Position - 1)),
                   Succeeded,
                   Diagnostic);
             else
@@ -1069,15 +1199,17 @@ package body Flyology_JSON.Writer_Core is
       is
          Ordinal  : Byte_Offset;
          Reserved : Boolean;
+         Status   : Commit_Status;
       begin
-         if Self.Current_State /= Active then
+         if Self.Current_State not in Ready | Active then
             Reject_State (Self, Diagnostic);
             return;
          end if;
          Reserve_Call (Self, Ordinal, Reserved, Diagnostic);
          if not Reserved then
             return;
-         elsif Self.Token /= No_Token
+         elsif Self.Current_State = Ready
+           or else Self.Token /= No_Token
            or else Self.Depth /= 0
            or else not Self.Root_Complete
          then
@@ -1085,41 +1217,45 @@ package body Flyology_JSON.Writer_Core is
             return;
          end if;
 
-         declare
-            --  Successful publication and the loss of transaction ownership,
-            --  or failed publication and its cleanup, are one abort-deferred
-            --  transfer under Ada RM 9.8.
-            type Commit_Transfer is new Ada.Finalization.Limited_Controlled with null record;
-
-            overriding procedure Initialize (Guard : in out Commit_Transfer) is
-               pragma Unreferenced (Guard);
-               Status : Commit_Status;
-            begin
-               Destination_Commit (Self.Target.all, Status);
-               if Status = Commit_Succeeded then
-                  Self.Owns_Transaction := False;
-                  Self.Current_State := Completed;
-                  Diagnostic := Clear_Diagnostic;
-               else
-                  Fail
-                    (Self,
-                     Make_Diagnostic
-                       (Commit_Failed, Staged_Output_Byte, Self.Next_Staged_Offset),
-                     Diagnostic);
-               end if;
-            end Initialize;
-
-            Transfer : Commit_Transfer;
-            pragma Unreferenced (Transfer);
          begin
-            null;
+            Destination_Commit (Self.Target.all, Status);
+         exception
+            when others =>
+               --  A raising Commit violates the generic contract and leaves
+               --  publication unknowable. Prevent finalization from issuing
+               --  an abort against a transaction that may already be public;
+               --  the caller must immediately unwind without reuse.
+               Self.Owns_Transaction := False;
+               raise;
          end;
+         if Status = Commit_Succeeded then
+            Self.Owns_Transaction := False;
+            Self.Current_State := Completed;
+            Diagnostic := Clear_Diagnostic;
+         else
+            Fail
+              (Self,
+               Make_Diagnostic
+                 (Commit_Failed, Staged_Output_Byte, Self.Next_Staged_Offset),
+               Diagnostic);
+         end if;
       end Finish_Document_Impl;
 
       procedure Abort_Document_Impl
         (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic)
       is
       begin
+         if Self.In_Call then
+            if not Self.Primary_Valid then
+               Publish_Primary (Self, Interrupted_Diagnostic (Self));
+            end if;
+            Abort_Owned_Transaction
+              (Self, Aborted, Unknown_Staged_Prefix => True);
+            Self.In_Call := False;
+            Diagnostic := Self.Last_Diagnostic;
+            return;
+         end if;
+
          case Self.Current_State is
             when Ready =>
                Self.Current_State := Aborted;
@@ -1129,7 +1265,7 @@ package body Flyology_JSON.Writer_Core is
                Abort_Owned_Transaction (Self, Aborted);
                Diagnostic := Self.Last_Diagnostic;
 
-            when Failed | Aborted =>
+            when Interrupted | Failed | Aborted =>
                Diagnostic := Self.Last_Diagnostic;
 
             when Uninitialized | Completed =>
@@ -1139,6 +1275,11 @@ package body Flyology_JSON.Writer_Core is
 
       procedure Reset_Impl (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
+         if Self.In_Call then
+            Reject_State (Self, Diagnostic);
+            return;
+         end if;
+
          if Self.Current_State not in Completed | Failed | Aborted then
             Reject_State (Self, Diagnostic);
             return;
@@ -1148,13 +1289,103 @@ package body Flyology_JSON.Writer_Core is
          Initialize_Impl (Self, Diagnostic);
       end Reset_Impl;
 
+      procedure Enter_Hot_Call
+        (Self       : in out Writer;
+         Execute    : out Boolean;
+         Diagnostic : out Writer_Core.Diagnostic)
+      is
+         Ordinal  : Byte_Offset;
+         Reserved : Boolean;
+      begin
+         if Self.In_Call or else Self.Current_State not in Ready | Active then
+            Reject_State (Self, Diagnostic);
+            Execute := False;
+            return;
+         end if;
+
+         Self.Interrupted_Ordinal := Self.Next_Call_Ordinal;
+         Self.In_Call := True;
+
+         if Self.Current_State = Ready then
+            Reserve_Call (Self, Ordinal, Reserved, Diagnostic);
+            if Reserved then
+               Grammar_Failure (Self, Ordinal, Diagnostic);
+            end if;
+            Self.In_Call := False;
+            Execute := False;
+         else
+            Execute := True;
+         end if;
+      end Enter_Hot_Call;
+
       generic
          with procedure Implementation
            (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic);
-      procedure Guarded_Simple_Call
+      procedure Hot_Simple_Call
         (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic);
 
-      procedure Guarded_Simple_Call
+      procedure Hot_Simple_Call
+        (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic)
+      is
+         Execute : Boolean;
+      begin
+         Enter_Hot_Call (Self, Execute, Diagnostic);
+         if Execute then
+            Implementation (Self, Diagnostic);
+            Self.In_Call := False;
+         end if;
+      end Hot_Simple_Call;
+
+      generic
+         with procedure Implementation
+           (Self       : in out Writer;
+            Value      : Ada.Streams.Stream_Element_Array;
+            Diagnostic : out Writer_Core.Diagnostic);
+      procedure Hot_Fragment_Call
+        (Self       : in out Writer;
+         Value      : Ada.Streams.Stream_Element_Array;
+         Diagnostic : out Writer_Core.Diagnostic);
+
+      procedure Hot_Fragment_Call
+        (Self       : in out Writer;
+         Value      : Ada.Streams.Stream_Element_Array;
+         Diagnostic : out Writer_Core.Diagnostic)
+      is
+         Execute : Boolean;
+      begin
+         Enter_Hot_Call (Self, Execute, Diagnostic);
+         if Execute then
+            Implementation (Self, Value, Diagnostic);
+            Self.In_Call := False;
+         end if;
+      end Hot_Fragment_Call;
+
+      generic
+         with procedure Implementation
+           (Self : in out Writer; Value : Boolean; Diagnostic : out Writer_Core.Diagnostic);
+      procedure Hot_Boolean_Call
+        (Self : in out Writer; Value : Boolean; Diagnostic : out Writer_Core.Diagnostic);
+
+      procedure Hot_Boolean_Call
+        (Self : in out Writer; Value : Boolean; Diagnostic : out Writer_Core.Diagnostic)
+      is
+         Execute : Boolean;
+      begin
+         Enter_Hot_Call (Self, Execute, Diagnostic);
+         if Execute then
+            Implementation (Self, Value, Diagnostic);
+            Self.In_Call := False;
+         end if;
+      end Hot_Boolean_Call;
+
+      generic
+         Allow_Interrupted : Boolean := False;
+         with procedure Implementation
+           (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic);
+      procedure Boundary_Simple_Call
+        (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic);
+
+      procedure Boundary_Simple_Call
         (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic)
       is
          procedure Perform is
@@ -1162,103 +1393,89 @@ package body Flyology_JSON.Writer_Core is
             Implementation (Self, Diagnostic);
          end Perform;
       begin
-         Run_Abort_Deferred (Self, Perform'Access);
-      end Guarded_Simple_Call;
+         if Self.In_Call and then not Allow_Interrupted then
+            Reject_State (Self, Diagnostic);
+            return;
+         end if;
+         Run_Boundary (Perform'Access);
+      end Boundary_Simple_Call;
 
-      generic
-         with procedure Implementation
-           (Self       : in out Writer;
-            Value      : Ada.Streams.Stream_Element_Array;
-            Diagnostic : out Writer_Core.Diagnostic);
-      procedure Guarded_Fragment_Call
-        (Self       : in out Writer;
-         Value      : Ada.Streams.Stream_Element_Array;
-         Diagnostic : out Writer_Core.Diagnostic);
+      procedure Boundary_Initialize is new Boundary_Simple_Call
+        (Implementation => Initialize_Impl);
+      procedure Boundary_Begin_Document is new Boundary_Simple_Call
+        (Implementation => Begin_Document_Impl);
+      procedure Hot_Begin_Object is new Hot_Simple_Call (Begin_Object_Impl);
+      procedure Hot_End_Object is new Hot_Simple_Call (End_Object_Impl);
+      procedure Hot_Begin_Array is new Hot_Simple_Call (Begin_Array_Impl);
+      procedure Hot_End_Array is new Hot_Simple_Call (End_Array_Impl);
+      procedure Hot_Begin_Name is new Hot_Simple_Call (Begin_Name_Impl);
+      procedure Hot_Put_Name_Fragment is new Hot_Fragment_Call (Put_Name_Fragment_Impl);
+      procedure Hot_End_Name is new Hot_Simple_Call (End_Name_Impl);
+      procedure Hot_Begin_String is new Hot_Simple_Call (Begin_String_Impl);
+      procedure Hot_Put_String_Fragment is new Hot_Fragment_Call (Put_String_Fragment_Impl);
+      procedure Hot_End_String is new Hot_Simple_Call (End_String_Impl);
+      procedure Hot_Begin_Number is new Hot_Simple_Call (Begin_Number_Impl);
+      procedure Hot_Put_Number_Fragment is new Hot_Fragment_Call (Put_Number_Fragment_Impl);
+      procedure Hot_End_Number is new Hot_Simple_Call (End_Number_Impl);
+      procedure Hot_Put_Null is new Hot_Simple_Call (Put_Null_Impl);
+      procedure Hot_Put_Boolean is new Hot_Boolean_Call (Put_Boolean_Impl);
+      procedure Boundary_Finish_Document is new Boundary_Simple_Call
+        (Implementation => Finish_Document_Impl);
+      procedure Boundary_Abort_Document is new Boundary_Simple_Call
+        (Allow_Interrupted => True, Implementation => Abort_Document_Impl);
+      procedure Boundary_Reset is new Boundary_Simple_Call
+        (Implementation => Reset_Impl);
 
-      procedure Guarded_Fragment_Call
+      procedure Initialize (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
+      begin
+         Boundary_Initialize (Self, Diagnostic);
+      end Initialize;
+
+      procedure Reject_Profile
         (Self       : in out Writer;
-         Value      : Ada.Streams.Stream_Element_Array;
+         Code       : Error_Code;
          Diagnostic : out Writer_Core.Diagnostic)
       is
          procedure Perform is
          begin
-            Implementation (Self, Value, Diagnostic);
+            Reject_Profile_Impl (Self, Code, Diagnostic);
          end Perform;
       begin
-         Run_Abort_Deferred (Self, Perform'Access);
-      end Guarded_Fragment_Call;
-
-      generic
-         with procedure Implementation
-           (Self : in out Writer; Value : Boolean; Diagnostic : out Writer_Core.Diagnostic);
-      procedure Guarded_Boolean_Call
-        (Self : in out Writer; Value : Boolean; Diagnostic : out Writer_Core.Diagnostic);
-
-      procedure Guarded_Boolean_Call
-        (Self : in out Writer; Value : Boolean; Diagnostic : out Writer_Core.Diagnostic)
-      is
-         procedure Perform is
-         begin
-            Implementation (Self, Value, Diagnostic);
-         end Perform;
-      begin
-         Run_Abort_Deferred (Self, Perform'Access);
-      end Guarded_Boolean_Call;
-
-      procedure Guarded_Initialize is new Guarded_Simple_Call (Initialize_Impl);
-      procedure Guarded_Begin_Document is new Guarded_Simple_Call (Begin_Document_Impl);
-      procedure Guarded_Begin_Object is new Guarded_Simple_Call (Begin_Object_Impl);
-      procedure Guarded_End_Object is new Guarded_Simple_Call (End_Object_Impl);
-      procedure Guarded_Begin_Array is new Guarded_Simple_Call (Begin_Array_Impl);
-      procedure Guarded_End_Array is new Guarded_Simple_Call (End_Array_Impl);
-      procedure Guarded_Begin_Name is new Guarded_Simple_Call (Begin_Name_Impl);
-      procedure Guarded_Put_Name_Fragment is new Guarded_Fragment_Call (Put_Name_Fragment_Impl);
-      procedure Guarded_End_Name is new Guarded_Simple_Call (End_Name_Impl);
-      procedure Guarded_Begin_String is new Guarded_Simple_Call (Begin_String_Impl);
-      procedure Guarded_Put_String_Fragment is new Guarded_Fragment_Call (Put_String_Fragment_Impl);
-      procedure Guarded_End_String is new Guarded_Simple_Call (End_String_Impl);
-      procedure Guarded_Begin_Number is new Guarded_Simple_Call (Begin_Number_Impl);
-      procedure Guarded_Put_Number_Fragment is new Guarded_Fragment_Call (Put_Number_Fragment_Impl);
-      procedure Guarded_End_Number is new Guarded_Simple_Call (End_Number_Impl);
-      procedure Guarded_Put_Null is new Guarded_Simple_Call (Put_Null_Impl);
-      procedure Guarded_Put_Boolean is new Guarded_Boolean_Call (Put_Boolean_Impl);
-      procedure Guarded_Finish_Document is new Guarded_Simple_Call (Finish_Document_Impl);
-      procedure Guarded_Abort_Document is new Guarded_Simple_Call (Abort_Document_Impl);
-      procedure Guarded_Reset is new Guarded_Simple_Call (Reset_Impl);
-
-      procedure Initialize (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
-      begin
-         Guarded_Initialize (Self, Diagnostic);
-      end Initialize;
+         if Self.In_Call then
+            Reject_State (Self, Diagnostic);
+            return;
+         end if;
+         Run_Boundary (Perform'Access);
+      end Reject_Profile;
 
       procedure Begin_Document (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_Begin_Document (Self, Diagnostic);
+         Boundary_Begin_Document (Self, Diagnostic);
       end Begin_Document;
 
       procedure Begin_Object (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_Begin_Object (Self, Diagnostic);
+         Hot_Begin_Object (Self, Diagnostic);
       end Begin_Object;
 
       procedure End_Object (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_End_Object (Self, Diagnostic);
+         Hot_End_Object (Self, Diagnostic);
       end End_Object;
 
       procedure Begin_Array (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_Begin_Array (Self, Diagnostic);
+         Hot_Begin_Array (Self, Diagnostic);
       end Begin_Array;
 
       procedure End_Array (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_End_Array (Self, Diagnostic);
+         Hot_End_Array (Self, Diagnostic);
       end End_Array;
 
       procedure Begin_Name (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_Begin_Name (Self, Diagnostic);
+         Hot_Begin_Name (Self, Diagnostic);
       end Begin_Name;
 
       procedure Put_Name_Fragment
@@ -1267,17 +1484,17 @@ package body Flyology_JSON.Writer_Core is
          Diagnostic : out Writer_Core.Diagnostic)
       is
       begin
-         Guarded_Put_Name_Fragment (Self, Value, Diagnostic);
+         Hot_Put_Name_Fragment (Self, Value, Diagnostic);
       end Put_Name_Fragment;
 
       procedure End_Name (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_End_Name (Self, Diagnostic);
+         Hot_End_Name (Self, Diagnostic);
       end End_Name;
 
       procedure Begin_String (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_Begin_String (Self, Diagnostic);
+         Hot_Begin_String (Self, Diagnostic);
       end Begin_String;
 
       procedure Put_String_Fragment
@@ -1286,7 +1503,7 @@ package body Flyology_JSON.Writer_Core is
          Diagnostic : out Writer_Core.Diagnostic)
       is
       begin
-         Guarded_Put_String_Fragment (Self, Value, Diagnostic);
+         Hot_Put_String_Fragment (Self, Value, Diagnostic);
       end Put_String_Fragment;
 
       procedure Put_String_Fragment_Unguarded_For_Test
@@ -1300,12 +1517,12 @@ package body Flyology_JSON.Writer_Core is
 
       procedure End_String (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_End_String (Self, Diagnostic);
+         Hot_End_String (Self, Diagnostic);
       end End_String;
 
       procedure Begin_Number (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_Begin_Number (Self, Diagnostic);
+         Hot_Begin_Number (Self, Diagnostic);
       end Begin_Number;
 
       procedure Put_Number_Fragment
@@ -1314,45 +1531,72 @@ package body Flyology_JSON.Writer_Core is
          Diagnostic : out Writer_Core.Diagnostic)
       is
       begin
-         Guarded_Put_Number_Fragment (Self, Value, Diagnostic);
+         Hot_Put_Number_Fragment (Self, Value, Diagnostic);
       end Put_Number_Fragment;
 
       procedure End_Number (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_End_Number (Self, Diagnostic);
+         Hot_End_Number (Self, Diagnostic);
       end End_Number;
 
       procedure Put_Null (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_Put_Null (Self, Diagnostic);
+         Hot_Put_Null (Self, Diagnostic);
       end Put_Null;
 
       procedure Put_Boolean
         (Self : in out Writer; Value : Boolean; Diagnostic : out Writer_Core.Diagnostic)
       is
       begin
-         Guarded_Put_Boolean (Self, Value, Diagnostic);
+         Hot_Put_Boolean (Self, Value, Diagnostic);
       end Put_Boolean;
 
       procedure Finish_Document (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_Finish_Document (Self, Diagnostic);
+         Boundary_Finish_Document (Self, Diagnostic);
       end Finish_Document;
 
       procedure Abort_Document (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_Abort_Document (Self, Diagnostic);
+         Boundary_Abort_Document (Self, Diagnostic);
       end Abort_Document;
 
       procedure Reset (Self : in out Writer; Diagnostic : out Writer_Core.Diagnostic) is
       begin
-         Guarded_Reset (Self, Diagnostic);
+         Boundary_Reset (Self, Diagnostic);
       end Reset;
 
-      function State (Self : Writer) return Writer_State is (Self.Current_State);
+      function State (Self : Writer) return Writer_State is
+        (if Self.In_Call then Interrupted else Self.Current_State);
 
       function Terminal_Diagnostic (Self : Writer) return Writer_Core.Diagnostic is
-        (Self.Last_Diagnostic);
+        (if Self.Primary_Valid then Self.Last_Diagnostic
+         elsif Self.In_Call then Interrupted_Diagnostic (Self)
+         else Self.Last_Diagnostic);
+
+      procedure Cleanup (Self : in out Writer) is
+      begin
+         if Self.In_Call and then not Self.Primary_Valid then
+            Publish_Primary (Self, Interrupted_Diagnostic (Self));
+         end if;
+
+         if Self.Owns_Transaction then
+            Abort_Owned_Transaction
+              (Self,
+               Aborted,
+               Unknown_Staged_Prefix => Self.In_Call);
+         elsif Self.In_Call then
+            Self.Current_State := Aborted;
+         end if;
+         Self.In_Call := False;
+      exception
+         when others =>
+            --  The destination violated its nonraising contract during scope
+            --  cleanup. The sole public controlled owner suppresses it while
+            --  unwinding and makes no recoverability claim.
+            Self.In_Call := False;
+            Self.Current_State := Aborted;
+      end Cleanup;
 
       procedure Set_Offsets_For_Test
         (Self        : in out Writer;
@@ -1363,11 +1607,6 @@ package body Flyology_JSON.Writer_Core is
          Self.Next_Staged_Offset := Next_Staged;
          Self.Next_Token_Offset := Next_Token;
       end Set_Offsets_For_Test;
-
-      overriding procedure Finalize (Self : in out Writer) is
-      begin
-         Abort_Owned_Transaction (Self, Aborted);
-      end Finalize;
 
    end Destination_Writers;
 

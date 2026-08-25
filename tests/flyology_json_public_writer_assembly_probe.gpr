@@ -1,0 +1,12 @@
+project Flyology_JSON_Public_Writer_Assembly_Probe is
+   for Source_Dirs use ("../src", ".");
+   for Object_Dir use "../obj/public-writer-assembly";
+   for Exec_Dir use "bin";
+   for Create_Missing_Dirs use "True";
+   for Main use ("flyology_json_public_writer_assembly_probe.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-O3", "-gnatp", "-gnat2022", "-gnatwa", "-gnatw.X", "-gnatwe", "-gnatyM110");
+   end Compiler;
+end Flyology_JSON_Public_Writer_Assembly_Probe;
