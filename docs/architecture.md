@@ -196,11 +196,11 @@ event transport are assembly-reviewed release properties.
 
 ## Release boundary
 
-Publication requires installed public parser/writer/token/numeric units,
+The publication gate required installed public parser/writer/token/numeric units,
 consumer spikes using only those units, maintained macOS/Linux GNAT evidence,
 APM 0.28 frozen reproduction/audit, source-archive tests, pinned corpus/oracle
 evidence, current-commit benchmarks, and a final P0/P1/P2 sweep. The
-`0.1.0-dev` development manifest pins the exact reviewed source commit and does
-not use a Git tag. The Flyology Alire index entry must resolve that origin
-without Git/path pins; compiler-provider locks stay host-local and
+published `0.1.0-dev` development manifest pins the exact reviewed source
+commit and does not use a Git tag. The Flyology Alire index entry resolves that
+origin without Git/path pins; compiler-provider locks stay host-local and
 non-propagating pins are never committed.

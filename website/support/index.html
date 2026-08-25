@@ -70,14 +70,17 @@
         <section id="release">
           <h2>Provision the Flyology Alire index</h2>
           <div class="semantic-callout">
-            <strong>Version 0.1.0-dev is the reviewed source candidate selected for index publication.</strong>
-            <p>Provision the index once. After publication, <code>alr with flyology_json=0.1.0-dev</code> resolves the
-              reviewed origin without a downstream Git or path pin.</p>
+            <strong>Version 0.1.0-dev is available from the Flyology Alire index.</strong>
+            <p>Provision the index once. <code>alr with flyology_json=0.1.0-dev</code> resolves the reviewed origin
+              without a downstream Git or path pin.</p>
           </div>
           <pre><code class="language-shell">alr index --reset-community
 alr index --add=git+https://github.com/flyology-ada/alire-index.git \
   --name=flyology --before=community
-alr with flyology_json=0.1.0-dev</code></pre>
+alr index --list
+cd /path/to/your/application
+alr with flyology_json=0.1.0-dev
+alr build</code></pre>
           <p>The repository manifest declares GCC-based GNAT 13 through 16 as its intended compiler range. The executed
             matrix below is the compatibility evidence.</p>
         </section>
@@ -171,7 +174,7 @@ alr with flyology_json=0.1.0-dev</code></pre>
         <section id="limits">
           <h2>Keep future work out of current claims</h2>
           <ul>
-            <li>Version 0.1.0-dev is a development release candidate; later versions may revise the experimental API.</li>
+            <li>Version 0.1.0-dev is a development release; later versions may revise the experimental API.</li>
             <li>The trusted package has no accounting or budget surface for untrusted consumer integration.</li>
             <li>Binary64, decimal, and application-specific number conversions are not current public units.</li>
             <li>Canonical JSON, a DOM, allocating conveniences, and Type IR, Wire, or OCI adapters are not current

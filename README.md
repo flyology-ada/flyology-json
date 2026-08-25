@@ -4,16 +4,18 @@
 The bounded core uses caller-provided storage, performs no heap allocation, and
 reports malformed input and resource failure without raising exceptions.
 
-Version `0.1.0-dev` is the reviewed source candidate selected for publication
-through the Flyology Alire index. Add the Flyology index ahead of the community
-index once; the release resolves without a Git or path pin after its exact
-development manifest is published:
+Version `0.1.0-dev` is available from the Flyology Alire index. Add the Flyology
+index ahead of the community index once, then add the crate without a Git or
+path pin:
 
 ```sh
 alr index --reset-community
 alr index --add=git+https://github.com/flyology-ada/alire-index.git \
   --name=flyology --before=community
+alr index --list
+cd /path/to/your/application
 alr with flyology_json=0.1.0-dev
+alr build
 ```
 
 ## Public surface
