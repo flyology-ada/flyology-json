@@ -43,6 +43,27 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
+verify_deployed_source() {
+  expected_root=$1
+  deployed_root=$2
+  (
+    cd "$expected_root"
+    find . -type f -print | LC_ALL=C sort |
+      while IFS= read -r relative_path; do
+        if [ "$relative_path" = ./alire.toml ]; then
+          continue
+        fi
+        if [ ! -f "$deployed_root/$relative_path" ] ||
+           ! cmp -s "$relative_path" "$deployed_root/$relative_path" ||
+           { [ -x "$relative_path" ] && [ ! -x "$deployed_root/$relative_path" ]; } ||
+           { [ ! -x "$relative_path" ] && [ -x "$deployed_root/$relative_path" ]; }; then
+          echo "deployed source differs from release origin: $relative_path" >&2
+          exit 1
+        fi
+      done
+  )
+}
+
 source_root="$temporary_root/source"
 mkdir -p "$source_root"
 git -C "$project_root" archive --format=tar "$origin_commit" | tar -xf - -C "$source_root"
@@ -57,27 +78,29 @@ if grep -n '^\[\[pins\]\]' "$source_root/alire.toml" >/dev/null; then
 fi
 
 echo "Testing source archive for $crate_name=$version at $origin_commit"
+test_root="$temporary_root/test-source"
+cp -R "$source_root" "$test_root"
 (
-  cd "$source_root"
+  cd "$test_root"
   alr --non-interactive test
 )
 
 settings_root="$temporary_root/alire-settings"
 mkdir -p "$settings_root"
 index_source=${FLYOLOGY_ALIRE_INDEX_SOURCE:-https://github.com/flyology-ada/alire-index.git}
+index_root="$temporary_root/index"
+git clone --quiet "$index_source" "$index_root"
+manifest_directory="$index_root/index/fl/$crate_name"
+manifest_path="$manifest_directory/$crate_name-$version.toml"
+expected_manifest="$temporary_root/$crate_name-$version.toml"
+cp "$source_root/alire.toml" "$expected_manifest"
+{
+  printf '\n[origin]\n'
+  printf 'commit = "%s"\n' "$origin_commit"
+  printf 'url = "git+https://github.com/flyology-ada/flyology-json.git"\n'
+} >>"$expected_manifest"
 
 if [ "$mode" = candidate ]; then
-  index_root="$temporary_root/index"
-  git clone --quiet "$index_source" "$index_root"
-  manifest_directory="$index_root/index/fl/$crate_name"
-  manifest_path="$manifest_directory/$crate_name-$version.toml"
-  expected_manifest="$temporary_root/$crate_name-$version.toml"
-  cp "$source_root/alire.toml" "$expected_manifest"
-  {
-    printf '\n[origin]\n'
-    printf 'commit = "%s"\n' "$origin_commit"
-    printf 'url = "git+https://github.com/flyology-ada/flyology-json.git"\n'
-  } >>"$expected_manifest"
   if [ -e "$manifest_path" ]; then
     if ! cmp -s "$expected_manifest" "$manifest_path"; then
       echo "published manifest differs from the release candidate: $manifest_path" >&2
@@ -99,17 +122,20 @@ if [ "$mode" = candidate ]; then
   (
     cd "$candidate_root"
     deployment=$(alr --non-interactive --settings="$settings_root" get --dirname "$crate_name=$version")
+    alr --non-interactive --settings="$settings_root" get --only "$crate_name=$version"
     case "$deployment" in
       /*) deployed_root=$deployment ;;
       *) deployed_root="$candidate_root/$deployment" ;;
     esac
-    if [ "$(git -C "$deployed_root" rev-parse HEAD)" != "$origin_commit" ]; then
-      echo "candidate index did not resolve the selected public source commit" >&2
-      exit 1
-    fi
+    verify_deployed_source "$source_root" "$deployed_root"
   )
   echo "Candidate index manifest passed: $manifest_path"
   exit 0
+fi
+
+if [ ! -f "$manifest_path" ] || ! cmp -s "$expected_manifest" "$manifest_path"; then
+  echo "published manifest does not identify the reviewed release origin: $manifest_path" >&2
+  exit 1
 fi
 
 alr --non-interactive --settings="$settings_root" index --reset-community
@@ -121,14 +147,12 @@ mkdir -p "$downstream_root"
 (
   cd "$downstream_root"
   deployment=$(alr --non-interactive --settings="$settings_root" get --dirname "$crate_name=$version")
+  alr --non-interactive --settings="$settings_root" get "$crate_name=$version"
   case "$deployment" in
     /*) deployed_root=$deployment ;;
     *) deployed_root="$downstream_root/$deployment" ;;
   esac
-  if [ "$(git -C "$deployed_root" rev-parse HEAD)" != "$origin_commit" ]; then
-    echo "indexed deployment did not resolve the selected source commit" >&2
-    exit 1
-  fi
+  verify_deployed_source "$source_root" "$deployed_root"
   if grep -n '^\[\[pins\]\]' "$deployed_root/alire.toml" >/dev/null; then
     echo "indexed deployment contains a non-propagating pin" >&2
     exit 1
