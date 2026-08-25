@@ -67,6 +67,27 @@ only installed contract comments and the draft-status README. A clean-source
 APM compilation reproduced the committed generated `AGENTS.md`; ignored local
 benchmark caches are not instruction authority.
 
+### Post-review clean-source runner repair
+
+The first remote run of this milestone found a later P1 in the maintained test
+runner, not in the parser implementation. A clean archive reached the external
+consumer GPR before Alire had materialized the ignored, host-local
+`config/flyology_json_config.gpr`; a dirty checkout concealed the dependency.
+
+Repair commit `011a4438f6fc8cea8c20d1631734e04b23778d38` runs the canonical
+`alr build` before compiling that external consumer and keeps generated
+configuration and compiler-provider locks uncommitted. The repaired
+`scripts/test-parser.sh` SHA-256 is
+`8dad6a97a1fbb2f7037f6171734df592c514e979643b1f5320bc892c7d2f56f5`.
+The same commit makes CI's retained-log diagnostic safe when an early Alire
+failure creates no log; `.github/workflows/ci.yml` SHA-256 is
+`e5cf214f34901ce54a4efbb316f812c4814fafb87135c6a6ea7da4d782c56264`.
+
+A clean Git archive reproduced the missing-project failure before the repair.
+The same archive with only the runner repair passed `alr test` under GNAT
+16.1.0. This closes the clean-source local parser test gate. The remote
+GNAT/OS matrix remains evidence to collect after this repair is pushed.
+
 ## Performance evidence
 
 On an Apple M3 Max quiet-window GNAT 16 release run, the 295 KiB
@@ -109,10 +130,12 @@ boundedness, lifetime, or public-contract blocker; P2 is an important
 pre-freeze quality or evidence defect.
 
 The final independent implementation and contract sweep found P0 0, P1 0, and
-no actionable parser-milestone P2. All findings raised against this change were
-fixed and narrowly re-reviewed. One corpus-evidence P2 remains explicitly
-authorized for deferral: the full bounded exhaustive every-split campaign is
-too expensive for routine execution and remains a release evidence gate.
+no actionable parser-milestone P2. All original parser findings were fixed and
+narrowly re-reviewed. The later clean-source runner P1 and failure-logging P2
+described above were also fixed and independently reviewed. One
+corpus-evidence P2 remains explicitly authorized for deferral: the full bounded
+exhaustive every-split campaign is too expensive for routine execution and
+remains a release evidence gate.
 
 The following are disclosed future gates, not closed by this milestone:
 
