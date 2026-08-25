@@ -17,6 +17,11 @@ no tasking, operating-system, Serde, Type IR, Wire, DOM, or C dependency. C and
 C++/Rust bridges belong only to separately reviewed benchmark adapters unless
 direct Ada cannot express a required mechanism.
 
+Parser and token-collector hot paths do not defer asynchronous task abort or
+abnormal transfer. An interrupted instance is discarded, not reset or reused;
+ordinary atomic/result guarantees apply only to normal return. The transactional
+writer makes a different, explicit abort-safety tradeoff below.
+
 ## Static package shapes
 
 The ordinary parser and writer are trusted packages: no budget field, hook,
@@ -70,7 +75,9 @@ An event is a compact private value with accessor semantics but no public size,
 layout, packing, or ABI. Absolute source ranges and inline decoded scalars
 survive event copies. A raw range is only a count-based borrow from the exact
 unchanged input actual supplied to the returning call; no access value is
-retained. Consumers copy before releasing or reusing that actual.
+retained. Range resolution validates coordinate containment, not Ada object or
+content identity; using the producing result with that exact unchanged actual
+is a caller obligation. Consumers copy before releasing or reusing it.
 
 The event grammar contains document/object/array boundaries, member-name and
 string begin/fragment/end, number begin/exact-fragment/end, null, and Boolean.
@@ -120,6 +127,18 @@ The writer binds a caller destination and explicit depth capacity. Destination
 publication. Explicit abort and limited-controlled finalization ensure one
 cleanup attempt; cleanup failure is secondary to an existing JSON failure.
 
+Every admitted mutating writer call is one abort-deferred operation covering
+its finite validation and scan, destination calls, and adjacent writer and
+ownership transitions. If abnormal transfer is pending, an abort-deferred
+cleanup finalizer ends an owned unpublished transaction exactly once and seals
+the writer terminal before unwinding. This deliberately favors transaction
+integrity over cancellation latency: the hot per-octet loop has no task-abort
+check or dispatch, but cancellation waits for the finite call and its
+caller-supplied destination work to return. Every destination formal is
+synchronous, nonraising, and must return; a destination that blocks
+indefinitely can therefore delay task abort indefinitely. The writer invents
+no timeout, helper task, preemption, or scheduling policy.
+
 Destination writes are bulk and prefix-reporting. Capacity exhaustion accepts
 the longest prefix, locating failure at the first unaccepted staged byte while
 avoiding octet-at-a-time calls. Other destination errors roll back that call.
@@ -135,16 +154,21 @@ transaction once and preserves the primary diagnostic.
 
 ## Numbers
 
-Checked signed, unsigned, binary64, decimal, and application conversions are
-separate from parsing. Integer conversion validates strict integer syntax and
-checks range before arithmetic overflow. Integer rendering is exact and
-transactional in caller output.
+Checked signed, unsigned, and binary64 conversions are separate from parsing.
+Decimal and application conversions are future packages, not part of the
+initial installed surface or its release evidence. Integer conversion validates
+strict integer syntax and checks range before arithmetic overflow. Integer
+rendering is exact and transactional in caller output.
 
-Binary64 uses `Interfaces.IEEE_Float_64`, nearest-even conversion, explicit
+Binary64 uses an always-valid `Interfaces.Unsigned_64` IEEE 754 interchange
+encoding with numeric bit zero least significant, sign bit 63, biased exponent
+bits 62 through 52, and fraction bits 51 through 0. The mapping is independent
+of host byte order. Conversion is nearest-even with explicit
 exact/rounded/underflow/overflow outcomes, negative-zero preservation, and
-shortest round-trip deterministic rendering. Nonfinite values are rejected.
-The implementation and claims require independent oracle, endpoint, compiler,
-and OS evidence.
+shortest round-trip deterministic rendering. NaN and infinity encodings are
+rejected without first materializing an invalid floating object. The
+implementation and claims require independent oracle, endpoint, compiler, and
+OS evidence.
 
 ## Verification
 

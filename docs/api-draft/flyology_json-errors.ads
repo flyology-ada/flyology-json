@@ -5,6 +5,9 @@ with Interfaces;
 package Flyology_JSON.Errors
   with Pure
 is
+   --  Absolute JSON streams and writer counters use a zero-based unsigned
+   --  64-bit coordinate space.  This is the reviewed public format boundary;
+   --  changing its width is source- and diagnostic-contract-incompatible.
    subtype Byte_Offset is Interfaces.Unsigned_64;
 
    type Error_Code is
@@ -12,6 +15,7 @@ is
       Unsupported_Profile,
       Incompatible_Profile,
       Invalid_State,
+      Final_Input_Retracted,
       Invalid_Writer_Grammar,
       Unexpected_Token,
       Trailing_Input,

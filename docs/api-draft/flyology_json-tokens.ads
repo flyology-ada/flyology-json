@@ -8,8 +8,7 @@ package Flyology_JSON.Tokens is
    type Collector_Status is
      (Operation_Accepted, Token_Completed, Invalid_Order, Storage_Exhausted);
 
-   type Token_Storage is
-     array (Ada.Streams.Stream_Element_Offset range <>) of Ada.Streams.Stream_Element;
+   subtype Token_Storage is Ada.Streams.Stream_Element_Array;
 
    type Collector (Storage : not null access Token_Storage) is limited private;
 
@@ -17,7 +16,8 @@ package Flyology_JSON.Tokens is
      (Self : in out Collector; Kind : Token_Kind; Status : out Collector_Status);
 
    --  Value is copied atomically: either every octet is staged or none is.
-   --  Input bounds are arbitrary and no input reference is retained.
+   --  Input bounds are arbitrary and no input reference is retained.  Value
+   --  must not overlap Storage; overlap is outside the collector contract.
    procedure Append
      (Self : in out Collector;
       Value : Ada.Streams.Stream_Element_Array;
@@ -38,6 +38,10 @@ package Flyology_JSON.Tokens is
 
    function Collected_Length (Self : Collector) return Ada.Streams.Stream_Element_Count
    with Pre => State (Self) = Complete;
+
+   --  Storage is unpublished and unobservable through the collector contract
+   --  while State is Collecting or Failed.  In Complete, exactly the
+   --  Collected_Length prefix beginning at Storage'First is readable.
 
 private
    type Collector (Storage : not null access Token_Storage) is limited record

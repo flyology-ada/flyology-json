@@ -39,6 +39,9 @@ package Flyology_JSON.Writing is
       Maximum_Depth : Natural)
    is limited private;
 
+   --  Maximum_Depth counts simultaneously open object and array containers;
+   --  a root container is depth one, while a scalar root needs depth zero.
+
    --  Profile must select Ordinary_Compact output.  Unsupported or
    --  incompatible profiles fail before Destination_Begin.
    procedure Initialize

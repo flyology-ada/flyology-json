@@ -12,7 +12,8 @@ generic
 package Flyology_JSON.Parsing is
    subtype Byte_Offset is Errors.Byte_Offset;
 
-   type Parser_State is (Uninitialized, Ready, Active, Completed, Failed, Aborted);
+   type Parser_State is
+     (Uninitialized, Ready, Active, Failure_Pending, Completed, Failed, Aborted);
 
    type Event_Kind is
      (Document_Begin,
@@ -46,11 +47,15 @@ package Flyology_JSON.Parsing is
    type Decoded_Fragment_Kind is
      (No_Decoded_Fragment, Decoded_Is_Raw_Range, Decoded_Inline_Scalar);
 
-   --  RFC 3629 fixes four as the maximum UTF-8 scalar width.
-   type Scalar_Octets is array (Positive range 1 .. 4) of Ada.Streams.Stream_Element;
+   --  RFC 3629 fixes four as the maximum UTF-8 scalar width.  This is a
+   --  constrained subtype of the common octet-array type so callers can pass
+   --  a decoded prefix directly to collector, writer, or numeric APIs.
+   subtype Scalar_Octets is
+     Ada.Streams.Stream_Element_Array
+       (Ada.Streams.Stream_Element_Offset range 1 .. 4);
 
    type Inline_Scalar is record
-      Length : Natural range 0 .. Scalar_Octets'Length;
+      Length : Positive range 1 .. Scalar_Octets'Length;
       Octets : Scalar_Octets;
    end record;
 
@@ -61,64 +66,68 @@ package Flyology_JSON.Parsing is
 
    type Event_Array is array (Ada.Streams.Stream_Element_Offset range <>) of Event;
 
-   function Kind (Item : Event) return Event_Kind;
+   function Kind (Item : Event) return Event_Kind
+   with Inline;
 
-   function Source (Item : Event) return Source_Range;
+   function Source (Item : Event) return Source_Range
+   with Inline;
 
-   function Has_Raw_Slice (Item : Event) return Boolean;
+   function Has_Raw_Slice (Item : Event) return Boolean
+   with Inline;
 
-   type Slice_Status is (Slice_Resolved, No_Raw_Slice, Wrong_Input_Window);
+   type Slice_Status is (Slice_Resolved, No_Raw_Slice, Range_Outside_Window);
 
-   --  Resolve the borrowed raw range only against the exact unchanged Input
-   --  actual from the call that returned Item.  Input_Origin is that call's
-   --  absolute input position and Input_Length is Input'Length.  The result is
-   --  a count from Input'First.  A wrong window returns status without raising
-   --  and clears Slice to zero counts.
-   procedure Resolve_Raw_Slice
+   --  Map Item's absolute raw coordinates into a caller-described input
+   --  window.  This validates coordinate containment only; it does not and
+   --  cannot authenticate an Ada array's identity or contents.  The caller
+   --  supplies the exact unchanged Input actual from the producing Step/Drain
+   --  call.  The result is a count from that Input's First.  A missing or
+   --  outside range returns zero counts without raising.
+   procedure Resolve_Raw_Range
      (Item         : Event;
-      Input_Origin : Byte_Offset;
-      Input_Length : Ada.Streams.Stream_Element_Count;
+      Window_Origin : Byte_Offset;
+      Window_Length : Ada.Streams.Stream_Element_Count;
       Slice        : out Chunk_Range;
       Status       : out Slice_Status);
 
-   function Decoded_Kind (Item : Event) return Decoded_Fragment_Kind;
+   function Decoded_Kind (Item : Event) return Decoded_Fragment_Kind
+   with Inline;
 
    function Decoded_Source (Item : Event) return Source_Range
-   with Pre => Decoded_Kind (Item) /= No_Decoded_Fragment;
+   with Pre => Decoded_Kind (Item) /= No_Decoded_Fragment,
+        Inline;
 
    function Decoded_Scalar (Item : Event) return Inline_Scalar
-   with Pre => Decoded_Kind (Item) = Decoded_Inline_Scalar;
+   with Pre => Decoded_Kind (Item) = Decoded_Inline_Scalar,
+        Inline;
 
    function Boolean_Data (Item : Event) return Boolean
-   with Pre => Kind (Item) = Boolean_Value;
+   with Pre => Kind (Item) = Boolean_Value,
+        Inline;
 
    type Step_Outcome is (Event_Ready, Need_Input, Document_Complete, Step_Failed, Call_Rejected);
 
-   type Step_Result (Outcome : Step_Outcome := Need_Input) is record
+   --  This result is definite: passing a constrained actual cannot raise when
+   --  Step returns another outcome.  Item is eligible only for Event_Ready;
+   --  Diagnostic only for Step_Failed or Call_Rejected.
+   type Step_Result is record
+      Outcome      : Step_Outcome;
       Input_Origin : Byte_Offset;
       Consumed     : Ada.Streams.Stream_Element_Count;
-      case Outcome is
-         when Event_Ready =>
-            Item : Event;
-         when Step_Failed | Call_Rejected =>
-            Diagnostic : Errors.Diagnostic;
-         when Need_Input | Document_Complete =>
-            null;
-      end case;
+      Item         : Event;
+      Diagnostic   : Errors.Diagnostic;
    end record;
 
    type Drain_Stop is (Output_Full, Drain_Need_Input, Drain_Document_Complete, Drain_Failed, Drain_Rejected);
 
-   type Drain_Result (Stop : Drain_Stop := Drain_Need_Input) is record
+   --  This result is definite.  Diagnostic is eligible only for Drain_Failed
+   --  or Drain_Rejected; other fields are eligible for every stop.
+   type Drain_Result is record
+      Stop         : Drain_Stop;
       Input_Origin : Byte_Offset;
       Consumed     : Ada.Streams.Stream_Element_Count;
       Produced     : Ada.Streams.Stream_Element_Count;
-      case Stop is
-         when Drain_Failed | Drain_Rejected =>
-            Diagnostic : Errors.Diagnostic;
-         when Output_Full | Drain_Need_Input | Drain_Document_Complete =>
-            null;
-      end case;
+      Diagnostic   : Errors.Diagnostic;
    end record;
 
    type Parser
@@ -127,6 +136,12 @@ package Flyology_JSON.Parsing is
       Name_Capacity       : Natural)
    is limited private;
 
+   --  Maximum_Depth counts simultaneously open object and array containers;
+   --  a root container is depth one, while a scalar root needs depth zero.
+   --  The two name capacities are ignored in Preserve_Unchecked and may be
+   --  zero.  Their strict-mode storage units and release points are normative
+   --  parts of the package contract.
+   --
    --  Profile must select the package's Duplicate_Mode.  Unsupported,
    --  mismatched, or incompatible profiles fail before byte zero.
    procedure Initialize
@@ -161,7 +176,7 @@ package Flyology_JSON.Parsing is
    with Pre => Has_Applied_Profile (Self);
 
    function Terminal_Diagnostic (Self : Parser) return Errors.Diagnostic
-   with Pre => State (Self) in Failed | Aborted;
+   with Pre => State (Self) in Failure_Pending | Failed | Aborted;
 
 private
    type Event is record
