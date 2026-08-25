@@ -51,7 +51,7 @@ if find "$source_root" -name alire.lock -o -name alire.lock.yaml | grep . >/dev/
   echo "release archive contains a host-local Alire lock" >&2
   exit 1
 fi
-if rg -n '^\[\[pins\]\]' "$source_root/alire.toml" >/dev/null; then
+if grep -n '^\[\[pins\]\]' "$source_root/alire.toml" >/dev/null; then
   echo "release manifest contains a non-propagating pin" >&2
   exit 1
 fi
@@ -93,7 +93,7 @@ if [ "$mode" = candidate ]; then
   )
   alr --non-interactive --settings="$settings_root" index --reset-community
   alr --non-interactive --settings="$settings_root" index \
-    --add="file:$index_root" --name=release-candidate --before=community
+    --add="file:$index_root" --name=release_candidate --before=community
   candidate_root="$temporary_root/candidate-downstream"
   mkdir -p "$candidate_root"
   (
@@ -129,7 +129,7 @@ mkdir -p "$downstream_root"
     echo "indexed deployment did not resolve the selected source commit" >&2
     exit 1
   fi
-  if rg -n '^\[\[pins\]\]' "$deployed_root/alire.toml" >/dev/null; then
+  if grep -n '^\[\[pins\]\]' "$deployed_root/alire.toml" >/dev/null; then
     echo "indexed deployment contains a non-propagating pin" >&2
     exit 1
   fi
