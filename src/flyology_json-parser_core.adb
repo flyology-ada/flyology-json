@@ -1650,6 +1650,7 @@ package body Flyology_JSON.Parser_Core is
                        when others      => False);
                   if Matches
                     and then (Complete_Limit = Input'Length
+                              or else Input_Octet (Input, Complete_Limit) = Comma
                               or else Is_Token_Delimiter (Input_Octet (Input, Complete_Limit)))
                   then
                      Scalar_Start := Self.Next_Offset + 1;

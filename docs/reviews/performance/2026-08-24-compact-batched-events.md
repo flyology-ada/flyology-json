@@ -68,6 +68,10 @@ identified above and cannot satisfy this change's performance gate. The
 post-fix binary passes its exact Flyology signature and the complete 63-case
 comparison preflight; fresh timing awaits a quiet host.
 
+The later comma-first child experiment below uses `feab029` as its exact
+paired baseline. Its accepted timings are independent of the excluded
+pre-P1 populations in this section.
+
 The [retained predecessor review](2026-08-24-literal-scan.md) records 1.047 ms /
 268.726 MiB/s for the same 294,913-octet `large_array` fixture. That predecessor
 used one-event `Next` and reconstructed the full `Event` record, while this
@@ -142,6 +146,45 @@ a serial checksum dependency, lost the vectorized second pass, and fell to
 roughly 304--312 microseconds. A lookup-table observer likewise prevented
 vectorization and fell to roughly 324--352 microseconds. These measurements are
 experimental rejection evidence, not accepted baselines.
+
+## Comma-first scalar child milestone
+
+The child candidate starts from commit
+`feab02907eea7248e28ecf37ad323357f4d9ed20`. Its only parser change tests the
+comma delimiter directly before calling the general token-delimiter
+classifier. `Is_Token_Delimiter` already contains comma, so the new arm is
+semantically redundant and changes only the generated branch shape. The
+candidate parser-core body SHA-256 is
+`a933d766a9c6cdb4d545367b569d817a03762f2a35502feb97ec167b004c89b6`.
+
+The paired portable GNAT 16.1 comparison binaries are:
+
+- baseline SHA-256
+  `66cccd628298ce6d2a31bc16b23607d5f04fd2105790b230d6ce8e97f1018df5`;
+- candidate SHA-256
+  `73e8bb9ebd6d87e74bf1478a17d2bc091c8d92341bec5edecab0c3ec2e71867b`.
+
+Both binaries use the same comparison harness, dependency closure, portable
+release switches, and `large_array` selector. Both preflights return the exact
+signature `14497054742`. Two accepted order-reversed pairs measured:
+
+| Pair order | Variant | Median ns | Decimal GB/s | MiB/s | CV |
+| --- | --- | ---: | ---: | ---: | ---: |
+| baseline, candidate | baseline | 258,232.430 | 1.1420 | 1,089.1 | 2.47% |
+| baseline, candidate | candidate | 245,814.461 | 1.1997 | 1,144.2 | 2.30% |
+| candidate, baseline | candidate | 244,703.125 | 1.2052 | 1,149.4 | 1.98% |
+| candidate, baseline | baseline | 254,347.656 | 1.1595 | 1,105.8 | 3.30% |
+
+The paired result is 3.79--4.81% lower median latency and 3.94--5.05% higher
+throughput. One earlier pilot pair is excluded: the candidate population had
+a 33.49% CV and an 852,326.813 ns preemption outlier. Its median pointed in
+the same direction but is not accepted evidence.
+
+ARM64 inspection shows the common comma success path replacing the general
+range checks and delimiter mask with `cmp #44; b.eq`. This saves six executed
+instructions per comma-delimited dense literal while increasing object text
+by 40 bytes. The complete checked parser runner and corpus work guard pass.
+Independent review found no P0, P1, or P2 issue in the change or evidence.
 
 ## Correctness and review
 
