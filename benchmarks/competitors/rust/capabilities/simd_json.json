@@ -79,7 +79,7 @@
       "output_policy_ids": [],
       "observable_result": "",
       "limitations": [
-        "No maintained fair serializer boundary was admitted; simd-json remains parser-only in this harness."
+        "No streaming writer boundary is exposed by this benchmark adapter."
       ]
     },
     {

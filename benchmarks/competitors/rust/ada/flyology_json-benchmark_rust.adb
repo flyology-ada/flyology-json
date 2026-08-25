@@ -168,18 +168,22 @@ package body Flyology_JSON.Benchmark_Rust is
       end if;
    end Set_Write_Result;
 
-   procedure Release (Context : in out Prepared_Document) is
-      Handle : constant System.Address := Context.Handle;
-      Ignored : C_Status;
+   procedure Release
+     (Context : in out Prepared_Document;
+      Status  : out Write_Status)
+   is
+      Handle         : constant System.Address := Context.Handle;
+      Foreign_Status : C_Status := 0;
    begin
       if Handle /= System.Null_Address then
          Context.Handle := System.Null_Address;
          case Context.Using is
-            when Serde_JSON => Ignored := Serde_JSON_Release_Write (Handle);
-            when Sonic_RS   => Ignored := Sonic_RS_Release_Write (Handle);
+            when Serde_JSON => Foreign_Status := Serde_JSON_Release_Write (Handle);
+            when Sonic_RS   => Foreign_Status := Sonic_RS_Release_Write (Handle);
             when SIMD_JSON  => null;
          end case;
       end if;
+      Status := To_Write_Status (Foreign_Status);
    end Release;
 
    procedure Prepare_Write
@@ -190,14 +194,21 @@ package body Flyology_JSON.Benchmark_Rust is
    is
       Status : C_Status;
       Handle : aliased System.Address := System.Null_Address;
+      Release_Status : Write_Status;
       Data_Address : constant System.Address :=
         (if Data'Length = 0 then System.Null_Address else Data (Data'First)'Address);
    begin
-      Release (Context);
+      Release (Context, Release_Status);
+      if Release_Status /= Write_Succeeded then
+         Result := (Status => Release_Status, Checksum => 0, Output_Octets => 0);
+         return;
+      end if;
       if Using = SIMD_JSON then
          Result := (Status => Write_Unsupported, Checksum => 0, Output_Octets => 0);
          return;
       end if;
+      --  Handle is an independently declared aliased scalar, disjoint from
+      --  Data. The Rust preparation call borrows Data only until it returns.
       Status :=
         (case Using is
             when Serde_JSON =>
@@ -226,6 +237,8 @@ package body Flyology_JSON.Benchmark_Rust is
          Result := (Status => Write_Invalid_Argument, Checksum => 0, Output_Octets => 0);
          return;
       end if;
+      --  The independently declared aliased scalars have disjoint storage and
+      --  the Rust context allocation does not retain or overlap either scalar.
       Status :=
         (case Context.Using is
             when Serde_JSON => Serde_JSON_Write (Context.Handle, Checksum'Access, Length'Access),
@@ -252,6 +265,9 @@ package body Flyology_JSON.Benchmark_Rust is
          Matches := False;
          return;
       end if;
+      --  Expected is borrowed only for this call. The independently declared
+      --  aliased outputs are mutually disjoint and do not overlap Expected or
+      --  the separately allocated Rust context.
       Status :=
         (case Context.Using is
             when Serde_JSON =>

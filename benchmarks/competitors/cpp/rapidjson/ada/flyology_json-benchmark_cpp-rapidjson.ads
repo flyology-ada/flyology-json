@@ -28,6 +28,12 @@ package Flyology_JSON.Benchmark_CPP.Rapidjson is
       Checksum      : Interfaces.Unsigned_64 := 0;
    end record;
 
+   --  Manually owns one native RapidJSON DOM after a successful Prepare_Write.
+   --  This benchmark-only limited type has no controlled finalizer: the caller
+   --  must call Release before the context leaves scope. Prepare_Write releases
+   --  any previously owned DOM before attempting replacement, and Release is
+   --  idempotent. Losing a prepared context without Release leaks that DOM and
+   --  its allocator storage until process termination.
    type Prepared_Document is limited private;
 
    procedure Prepare_Write

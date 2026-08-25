@@ -42,6 +42,11 @@ package Flyology_JSON.Benchmark_Rust is
       Output_Octets : Ada.Streams.Stream_Element_Count;
    end record;
 
+   --  Prepared_Document owns a Rust allocation after a successful Prepare_Write.
+   --  Ownership is manual: this benchmark-only type is limited but not controlled,
+   --  so every prepared value must be passed to Release, including on exceptional
+   --  paths. Letting a prepared value leave scope without Release leaks that
+   --  allocation. Release consumes the ownership and reports cleanup status.
    type Prepared_Document is limited private;
 
    procedure Prepare_Write
@@ -60,7 +65,9 @@ package Flyology_JSON.Benchmark_Rust is
       Result   : out Write_Observation;
       Matches  : out Boolean);
 
-   procedure Release (Context : in out Prepared_Document);
+   procedure Release
+     (Context : in out Prepared_Document;
+      Status  : out Write_Status);
 
    function Is_Prepared (Context : Prepared_Document) return Boolean;
 

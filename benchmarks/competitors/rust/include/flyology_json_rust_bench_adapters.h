@@ -57,12 +57,27 @@ int flyology_json_bench_simd_json_traverse(const uint8_t *input,
                                            uint64_t *checksum,
                                            size_t *items);
 
-/* Writer preparation owns a crate DOM behind an opaque context until the
- * matching release call. Preparation does not publish a context on failure.
- * Write calls borrow that context for the call, allocate and serialize a
- * complete output, observe every byte, then release the output allocation.
- * Check calls additionally compare that output byte-for-byte. All input and
- * output pointer ranges must remain valid for the duration of their call. */
+/* Writer preparation requires `input` to identify `length` readable bytes and
+ * `context` to identify one writable pointer slot. The input range and context
+ * slot must not overlap. Input is borrowed only for this call. Preparation
+ * does not modify the slot on failure. On success it publishes unique ownership
+ * of an opaque crate DOM; the caller must pass that pointer only to the matching
+ * implementation's write/check/release functions and release it exactly once.
+ *
+ * A write call requires a live context from the matching prepare call plus
+ * writable `checksum` and `output_length` scalars. The context allocation and
+ * both output scalars must be pairwise disjoint. No write/check/release call may
+ * use the context concurrently with another such call.
+ *
+ * A check call additionally requires `expected` to identify `expected_length`
+ * readable bytes and `matches` to identify one writable int. The expected range,
+ * context allocation, checksum, output-length, and matches storage must all be
+ * mutually nonoverlapping. Write and check allocate and serialize a complete
+ * output, observe every byte, and release that output before returning.
+ *
+ * Release accepts null as a no-op. A nonnull argument transfers the unique
+ * context ownership back to Rust and is consumed regardless of returned status;
+ * it must be live, must not have concurrent users, and must never be used again. */
 int flyology_json_bench_serde_json_prepare_write(const uint8_t *input,
                                                   size_t length,
                                                   void **context);

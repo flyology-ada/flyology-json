@@ -229,6 +229,16 @@ unsafe fn publish_checked_write(
     STATUS_OK
 }
 
+/// Prepares an owned serde_json DOM for repeated benchmark writes.
+///
+/// # Safety
+///
+/// `input_pointer` must be nonnull and identify `length` readable bytes.
+/// `context` must identify a writable pointer slot that does not overlap the
+/// input range. Both remain live for this call. On success, the published
+/// pointer is unique ownership: use it only with the serde_json writer/check
+/// functions, do not access it concurrently, and release it exactly once with
+/// `flyology_json_bench_serde_json_release_write`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn flyology_json_bench_serde_json_prepare_write(
     input_pointer: *const u8,
@@ -250,6 +260,16 @@ pub unsafe extern "C" fn flyology_json_bench_serde_json_prepare_write(
     }
 }
 
+/// Prepares an owned sonic-rs DOM for repeated benchmark writes.
+///
+/// # Safety
+///
+/// `input_pointer` must be nonnull and identify `length` readable bytes.
+/// `context` must identify a writable pointer slot that does not overlap the
+/// input range. Both remain live for this call. On success, the published
+/// pointer is unique ownership: use it only with the sonic-rs writer/check
+/// functions, do not access it concurrently, and release it exactly once with
+/// `flyology_json_bench_sonic_rs_release_write`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn flyology_json_bench_sonic_rs_prepare_write(
     input_pointer: *const u8,
@@ -271,6 +291,15 @@ pub unsafe extern "C" fn flyology_json_bench_sonic_rs_prepare_write(
 
 macro_rules! writer_functions {
     ($write_name:ident, $check_name:ident, $release_name:ident, $value:ty, $serialize:path) => {
+        /// Serializes and observes one prepared DOM.
+        ///
+        /// # Safety
+        ///
+        /// `context` must be the live pointer returned by the matching prepare
+        /// function and must not be used concurrently. `checksum` and
+        /// `output_length` must identify writable scalars. The context allocation
+        /// and both output scalars must be pairwise disjoint and remain live for
+        /// this call.
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn $write_name(
             context: *const c_void,
@@ -293,6 +322,16 @@ macro_rules! writer_functions {
             }
         }
 
+        /// Serializes a prepared DOM and compares the output byte-for-byte.
+        ///
+        /// # Safety
+        ///
+        /// `context` must be the live pointer returned by the matching prepare
+        /// function and must not be used concurrently. `expected_pointer` must
+        /// be nonnull and identify `expected_length` readable bytes. `checksum`,
+        /// `output_length`, and `matches` must identify writable scalars. The
+        /// context allocation, expected range, and all three output scalars must
+        /// be mutually nonoverlapping and remain live for this call.
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn $check_name(
             context: *const c_void,
@@ -324,6 +363,14 @@ macro_rules! writer_functions {
             }
         }
 
+        /// Releases one prepared DOM.
+        ///
+        /// # Safety
+        ///
+        /// `context` must be null or the live, uniquely owned pointer returned by
+        /// the matching prepare function. A nonnull context must have no concurrent
+        /// users, is consumed regardless of returned status, and must never be used
+        /// or released again.
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn $release_name(context: *mut c_void) -> i32 {
             if context.is_null() {

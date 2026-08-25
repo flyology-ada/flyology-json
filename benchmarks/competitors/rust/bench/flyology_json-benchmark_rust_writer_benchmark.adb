@@ -1,3 +1,6 @@
+--  Copyright (c) 2026 Yurii Rashkovskii
+--  SPDX-License-Identifier: MIT OR Apache-2.0
+
 with Ada.Environment_Variables;
 with Ada.Streams;
 with Ada.Strings;
@@ -103,6 +106,16 @@ procedure Flyology_JSON.Benchmark_Rust_Writer_Benchmark is
       end loop;
    end Write_Batch;
    procedure Measure is new Flyology_Bench.Measure_Result_Batched (Element => U64, Batch => Write_Batch);
+
+   procedure Release_Checked (Context : in out Rust.Prepared_Document) is
+      Status : Rust.Write_Status;
+   begin
+      Rust.Release (Context, Status);
+      if Status /= Rust.Write_Succeeded then
+         raise Program_Error with "Rust writer release failed";
+      end if;
+   end Release_Checked;
+
    Base_Config : constant Flyology_Bench.Configuration :=
      (Warmup_Time => 0.100, Measurement_Time => 0.500, Maximum_Sampling_Time => 0.0,
       Samples => 50, Minimum_Sample_Time => 0.000_100, Maximum_Iterations => 65_536,
@@ -159,9 +172,11 @@ procedure Flyology_JSON.Benchmark_Rust_Writer_Benchmark is
             end if;
          end if;
       end;
-      Rust.Release (Context (Using, Kind).all);
+      Release_Checked (Context (Using, Kind).all);
    exception
-      when others => Rust.Release (Context (Using, Kind).all); raise;
+      when others =>
+         Release_Checked (Context (Using, Kind).all);
+         raise;
    end Run;
 begin
    if Output_Mode not in "terminal" | "csv" | "metrics_csv" | "json" then raise Constraint_Error; end if;

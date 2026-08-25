@@ -30,6 +30,15 @@ procedure Flyology_JSON.Benchmark_Rust_Tests is
       return Result;
    end Octets;
 
+   procedure Release_Checked (Context : in out Adapter.Prepared_Document) is
+      Status : Adapter.Write_Status;
+   begin
+      Adapter.Release (Context, Status);
+      if Status /= Adapter.Write_Succeeded then
+         raise Program_Error with "Rust writer release failed";
+      end if;
+   end Release_Checked;
+
    Valid_Text : constant String := "{""a"":[null,true,-1,1.5,""x""]}";
 
 begin
@@ -111,14 +120,14 @@ begin
          then
             raise Program_Error with "Rust writer observation failed";
          end if;
-         Adapter.Release (Context);
-         Adapter.Release (Context);
+         Release_Checked (Context);
+         Release_Checked (Context);
          if Adapter.Is_Prepared (Context) then
             raise Program_Error with "Rust writer release retained context";
          end if;
       exception
          when others =>
-            Adapter.Release (Context);
+            Release_Checked (Context);
             raise;
       end;
    end loop;
