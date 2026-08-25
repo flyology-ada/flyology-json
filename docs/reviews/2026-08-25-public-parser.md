@@ -85,8 +85,14 @@ failure creates no log; `.github/workflows/ci.yml` SHA-256 is
 
 A clean Git archive reproduced the missing-project failure before the repair.
 The same archive with only the runner repair passed `alr test` under GNAT
-16.1.0. This closes the clean-source local parser test gate. The remote
-GNAT/OS matrix remains evidence to collect after this repair is pushed.
+16.1.0. This closes the clean-source local parser test gate.
+
+GitHub Actions run
+[`32829916060`](https://github.com/flyology-ada/flyology-json/actions/runs/32829916060)
+then passed from evidence head `aecfee74762b183a5fa3619c3a675c8c51048500`.
+All eight parser jobs passed with GNAT 13.2.2, 14.2.1, 15.3.1, and 16.1.0 on
+macOS 15 and Ubuntu 24.04. All four portable/native benchmark-adapter jobs also
+passed on those two operating systems.
 
 ## Performance evidence
 
@@ -143,6 +149,5 @@ The following are disclosed future gates, not closed by this milestone:
   assembly evidence after an indexed release exists;
 - that intentionally infrequent exhaustive corpus campaign, with a finite
   maintained bound, as recorded in the provisional corpus review;
-- the maintained GNAT 13--16 and macOS/Linux release matrix; and
 - public writer implementation, writer comparison lanes, final repository
   review, immutable release tag, and Flyology Alire index publication.
