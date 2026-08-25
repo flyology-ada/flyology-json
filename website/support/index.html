@@ -68,12 +68,16 @@
       </aside>
       <article class="prose">
         <section id="release">
-          <h2>Do not add a release dependency yet</h2>
+          <h2>Provision the Flyology Alire index</h2>
           <div class="semantic-callout">
-            <strong>Version 0.1.0-dev is experimental, not yet released, and not yet indexed.</strong>
-            <p>The Flyology Alire index does not yet provide a reviewed, no-pin release. Downstream crates must wait for
-              the indexed milestone. The API may still change during final review.</p>
+            <strong>Version 0.1.0-dev is the reviewed source candidate selected for index publication.</strong>
+            <p>Provision the index once. After publication, <code>alr with flyology_json=0.1.0-dev</code> resolves the
+              reviewed origin without a downstream Git or path pin.</p>
           </div>
+          <pre><code class="language-shell">alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+alr with flyology_json=0.1.0-dev</code></pre>
           <p>The repository manifest declares GCC-based GNAT 13 through 16 as its intended compiler range. The executed
             matrix below is the compatibility evidence.</p>
         </section>
@@ -145,8 +149,8 @@
           <ul><li>arbitrary Ada bounds, empty input, and chunk or fragment schedules;</li><li>exact depth and storage limits, reset, and abort;</li><li>destination exhaustion, commit or abort failure, and task interruption; and</li><li>exact offsets and transactional nonpublication.</li></ul>
           <p>Public-surface assembly gates require parser accessors and the batched path to inline without an indirect hot
             call. A separate gate requires the writer string-fragment path to inline. It rejects finalization, tasking,
-            and allocation runtime calls in that probe. Installed no-pin consumer assembly evidence remains a release
-            gate.</p>
+            and allocation runtime calls in that probe. The release workflow repeats the public-unit test action from
+            the source archive and from a fresh indexed solve.</p>
         </section>
 
         <section id="corpora">
@@ -154,8 +158,9 @@
           <p>The parser lane pins 314 selected JSONTestSuite fixtures and 80 selected JSON Schema Test Suite JSON files.
             The repository verifies exact fixture sets, licenses, byte digests, and aggregate manifests before execution.</p>
           <p>All 394 fixtures run as one chunk, as one-byte chunks, and with deterministic randomized schedules. Malformed
-            inputs must retain the monolithic error code and byte offset. The expensive every-single-split campaign has an
-            explicit caller-supplied work ceiling and is not part of routine continuous integration.</p>
+            inputs must retain the monolithic error code and byte offset. Bounded transition fixtures additionally run
+            every split. The full-corpus quadratic planner refuses to start without an explicit work ceiling; the release
+            review records its computed 82,539,090,222-unit requirement instead of launching a very large loop.</p>
           <p>The writer lane uses four project-owned event tapes and exact hexadecimal golden output. Each token runs whole,
             one octet at a time, at every single split, and through four deterministic randomized schedules. The public
             parser reparses the output under varied chunks. Node's built-in JSON parser provides an additional independent
@@ -166,8 +171,7 @@
         <section id="limits">
           <h2>Keep future work out of current claims</h2>
           <ul>
-            <li>The API remains experimental until the reviewed 0.1.0-dev index release.</li>
-            <li>Fresh downstream resolution without a Git or path pin remains a release gate.</li>
+            <li>Version 0.1.0-dev is a development release candidate; later versions may revise the experimental API.</li>
             <li>The trusted package has no accounting or budget surface for untrusted consumer integration.</li>
             <li>Binary64, decimal, and application-specific number conversions are not current public units.</li>
             <li>Canonical JSON, a DOM, allocating conveniences, and Type IR, Wire, or OCI adapters are not current

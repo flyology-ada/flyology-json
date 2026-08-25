@@ -1,0 +1,47 @@
+name: Release reproduction
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Verify the proposed manifest or the published index release
+        required: true
+        type: choice
+        options:
+          - candidate
+          - indexed
+      origin_commit:
+        description: Exact flyology-json commit pinned by the development manifest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    name: ${{ inputs.mode }} / GNAT 16.1.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out the exact release ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.origin_commit }}
+      - name: Install Alire and GNAT
+        uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
+        with:
+          version: 2.1.1
+          toolchain: gnat_native=16.1.0 gprbuild=26.0.1
+          cache: true
+      - name: Select exact Ada toolchain
+        run: |
+          alr --non-interactive toolchain --select \
+            gnat_native=16.1.0 \
+            gprbuild=26.0.1
+      - name: Reproduce release
+        env:
+          RELEASE_MODE: ${{ inputs.mode }}
+          ORIGIN_COMMIT: ${{ inputs.origin_commit }}
+        run: ./scripts/verify-release.sh "$RELEASE_MODE" "$ORIGIN_COMMIT"

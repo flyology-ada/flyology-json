@@ -138,16 +138,18 @@ pre-freeze quality or evidence defect.
 The final independent implementation and contract sweep found P0 0, P1 0, and
 no actionable parser-milestone P2. All original parser findings were fixed and
 narrowly re-reviewed. The later clean-source runner P1 and failure-logging P2
-described above were also fixed and independently reviewed. One
-corpus-evidence P2 remains explicitly authorized for deferral: the full bounded
-exhaustive every-split campaign is too expensive for routine execution and
-remains a release evidence gate.
+described above were also fixed and independently reviewed. The milestone
+originally deferred one corpus-evidence P2: the full bounded exhaustive
+every-split campaign was too expensive for routine execution. The later release
+review computed its 82,539,090,222-unit requirement. The user's explicit
+no-very-large-loop direction supersedes that release gate with full monolith,
+one-byte, and deterministic random schedules for every corpus file, plus
+exhaustive splits and partitions for bounded transition fixtures.
 
 The following are disclosed future gates, not closed by this milestone:
 
 - fresh installed and no-pin downstream resolution plus installed-library
   assembly evidence after an indexed release exists;
-- that intentionally infrequent exhaustive corpus campaign, with a finite
-  maintained bound, as recorded in the provisional corpus review;
 - public writer implementation, writer comparison lanes, final repository
-  review, immutable release tag, and Flyology Alire index publication.
+  review, and Flyology Alire index publication. The later release decision uses
+  the index-pinned exact commit for `0.1.0-dev` and no Git tag.

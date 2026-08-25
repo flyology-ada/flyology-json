@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-08-25T18:18:47.284300+00:00'
+generated_at: '2026-08-25T19:23:56.005725+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: _local/repository
@@ -9,7 +9,7 @@ dependencies:
   deployed_files:
   - .claude/rules/project.md
   deployed_file_hashes:
-    .claude/rules/project.md: sha256:cd11011d6782ad022a38f4de8252fb4db77a4a464e29206e1ee33791ab386fd9
+    .claude/rules/project.md: sha256:f84fc93e41d11e1745bf4a6a9f2b7e76748082498e59fd08f4c99e777dcae467
   source: local
   local_path: ./agent-packages/repository
 - repo_url: _local/website
@@ -495,7 +495,7 @@ deployments:
   owners:
   - ./agent-packages/repository
   active_owner: ./agent-packages/repository
-  content_hash: sha256:cd11011d6782ad022a38f4de8252fb4db77a4a464e29206e1ee33791ab386fd9
+  content_hash: sha256:f84fc93e41d11e1745bf4a6a9f2b7e76748082498e59fd08f4c99e777dcae467
 - kind: project-relative
   target: claude
   value: .claude/rules/repository-workflow.md

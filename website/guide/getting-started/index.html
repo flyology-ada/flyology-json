@@ -19,8 +19,21 @@
   <main id="main">
     <section class="guide-hero page-shell"><span class="eyebrow">Guide · Getting started</span><h1>Parse a document.</h1><p>The first program uses strict JSON, strict decoded-name duplicate rejection, caller-selected capacities, and a caller event buffer.</p></section>
     <div class="guide-layout page-shell">
-      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#parse">Parse one value</a></li><li><a href="#run">Build and run</a></li><li><a href="#continue">Continue with chunks</a></li><li><a href="#status">Check release status</a></li></ol></aside>
+      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#install">Add the crate</a></li><li><a href="#parse">Parse one value</a></li><li><a href="#run">Build and run</a></li><li><a href="#continue">Continue with chunks</a></li></ol></aside>
       <article class="prose">
+        <section id="install">
+          <h2>Add the Flyology index and crate</h2>
+          <p>Keep the community index for the compiler and third-party crates. Add the Flyology index ahead of it once, from any directory:</p>
+          <pre><code class="language-shell">alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+alr index --list</code></pre>
+          <p>After the 0.1.0-dev manifest is published, add the reviewed development release to your application:</p>
+          <pre><code class="language-shell">cd /path/to/your/application
+alr with flyology_json=0.1.0-dev
+alr build</code></pre>
+          <p>Alire resolves the indexed release and its compiler constraint. No Git or local path pin is needed.</p>
+        </section>
         <section id="parse">
           <h2>Parse one complete value</h2>
           <p>The example instantiates <a data-api="Flyology_JSON.Parsing"><code>Flyology_JSON.Parsing</code></a> with strict duplicate rejection. It constructs a complete <a data-api="Flyology_JSON.Profiles.Parser_Profile"><code>Parser_Profile</code></a> before byte zero. The zero capacities are explicit application choices for this scalar input, not library defaults.</p>
@@ -67,10 +80,6 @@
           <h2>Continue with arbitrary chunks</h2>
           <p>The maintained <code>streaming_parser.adb</code> example advances only by returned consumed and produced counts. It accepts a deliberately awkward string boundary.</p>
           <p>Continue with the <a href="../parsing/">parsing guide</a> before retaining raw ranges or building an application candidate.</p>
-        </section>
-        <section id="status">
-          <h2>Check the current release</h2>
-          <p>Version 0.1.0-dev is undergoing final publication. See <a href="../../support/">Support</a> for the current indexed-release status.</p>
         </section>
         <div class="next-links"><a href="../parsing/"><span>Next</span>Parse arbitrary input chunks</a></div>
       </article>

@@ -126,6 +126,14 @@ intentionally authorized, sharded action rather than a routine local test.
 A two-fixture every-split smoke run passed and exercises the split-zero empty
 nonfinal call, but it does not satisfy or stand in for the full campaign.
 
+The later `0.1.0-dev` release review computed the complete campaign at
+82,539,090,222 work units. Under the user's explicit instruction not to run a
+very large loop, the release gate is superseded rather than deferred: every
+executable fixture retains monolithic, one-byte, and deterministic randomized
+schedules, while bounded transition fixtures retain exhaustive splits and
+partitions. The planner and refusal remain maintained so corpus growth cannot
+silently turn a bounded action into an accidental quadratic run.
+
 ## Findings
 
 - P0: none.
@@ -133,8 +141,8 @@ nonfinal call, but it does not satisfy or stand in for the full campaign.
   digest checks were made executable, expectations became immutable reviewed
   inputs rather than importer-generated labels, Linux digest tooling gained a
   fallback, and resource denial stopped counting as malformed rejection.
-- P2: full corpus `every-split` execution remains outstanding because the
-  retained direct campaign is quadratic on two adversarial fixtures. WPT
-  evidence is intentionally not an executable corpus yet. Neither gap removes
-  current UTF-8 boundary coverage: JSONTestSuite supplies malformed UTF-8 data
-  and the dedicated UTF-8 tests exhaust all scalar encodings.
+- P2: the later release decision above closes the full-corpus `every-split`
+  gate with an explicitly authorized bounded substitute. WPT evidence remains
+  intentionally non-executable. That gap does not remove current UTF-8 boundary
+  coverage: JSONTestSuite supplies malformed UTF-8 data and the dedicated UTF-8
+  tests exhaust all scalar encodings.

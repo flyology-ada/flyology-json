@@ -2,7 +2,7 @@
 
 > Experimental Ada-first incremental JSON parser and transactional streaming writer.
 
-Flyology JSON 0.1.0-dev is not yet released in the Flyology Alire index. The bounded core performs no heap allocation. Callers supply input, event storage, duplicate-name storage, token storage, and writer destination staging.
+Flyology JSON 0.1.0-dev is the reviewed source candidate for Flyology Alire index publication. After publication, the indexed release resolves without a downstream Git or path pin. The bounded core performs no heap allocation. Callers supply input, event storage, duplicate-name storage, token storage, and writer destination staging.
 
 ## Documentation
 

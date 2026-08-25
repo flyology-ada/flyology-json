@@ -172,10 +172,13 @@ OS evidence.
 Focused tests cover every parser/writer transition, malformed/truncated input,
 all Unicode scalars and escape/surrogate combinations, arbitrary array bounds,
 exact resource boundaries, reset/abort/reuse, destination failures, numeric
-endpoints, token staging, and transactional publication. Every fixture runs
-monolithically, one byte at a time, at every retained split, and under seeded
-random schedules; deliberately quadratic full-corpus campaigns require an
-explicit caller work ceiling and are not routine CI loops.
+endpoints, token staging, and transactional publication. Every corpus fixture
+runs monolithically, one byte at a time, and under seeded random schedules.
+Every split is retained for bounded transition fixtures; large adversarial
+fixtures retain focused boundary schedules rather than a quadratic replay.
+Any exhaustive corpus action must compute and require an explicit caller work
+ceiling before it starts, and a release record must disclose both a refused
+campaign's work requirement and the bounded evidence used in its place.
 
 Pinned corpora retain exact revisions, licenses, byte manifests, and
 profile-specific expectations. Corpus labels and differential agreement are
@@ -196,7 +199,8 @@ event transport are assembly-reviewed release properties.
 Publication requires installed public parser/writer/token/numeric units,
 consumer spikes using only those units, maintained macOS/Linux GNAT evidence,
 APM 0.28 frozen reproduction/audit, source-archive tests, pinned corpus/oracle
-evidence, current-commit benchmarks, and a final P0/P1/P2 sweep. The immutable
-annotated tag is `flyology_json/v0.1.0-dev`. The Flyology Alire index entry must
-resolve the reviewed origin without Git/path pins; compiler-provider locks stay
-host-local and non-propagating pins are never committed.
+evidence, current-commit benchmarks, and a final P0/P1/P2 sweep. The
+`0.1.0-dev` development manifest pins the exact reviewed source commit and does
+not use a Git tag. The Flyology Alire index entry must resolve that origin
+without Git/path pins; compiler-provider locks stay host-local and
+non-propagating pins are never committed.

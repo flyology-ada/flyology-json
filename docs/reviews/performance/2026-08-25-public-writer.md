@@ -180,3 +180,13 @@ important pre-milestone quality or coverage issue.
 - P2: the host has Node 25.2.1, while the repository deliberately admits only
   Node 24.19.0 for benchmark validation. The yyjson validator's syntax and
   focused fixtures were checked, but its exact-toolchain execution awaits CI.
+
+## Release follow-up
+
+The later `0.1.0-dev` release candidate adds reviewed RapidJSON, serde_json,
+and sonic-rs `write_dom` lanes for the same two exact writer fixtures. Their
+coarse benchmark-only ABIs, ownership tests, output preflight, strict population
+validators, provenance, and portable/native weekly integration close the first
+P2 above. The current-commit weekly workflow supplies the exact Node 24.19.0
+matrix evidence required by the remaining two P2 findings; the release record
+in `docs/releases/0.1.0-dev.md` owns the final disposition.

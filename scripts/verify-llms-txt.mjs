@@ -41,7 +41,7 @@ for (const route of requiredRoutes) {
 const boundaryPhrases = [
   "experimental",
   "0.1.0-dev",
-  "not yet released",
+  "Flyology Alire index",
   "signed",
   "unsigned",
   "Binary64",

@@ -1,0 +1,140 @@
+#!/bin/sh
+# Copyright (c) 2026 Yurii Rashkovskii
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+set -eu
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] ||
+   { [ "$1" != candidate ] && [ "$1" != indexed ]; }; then
+  echo "usage: ./scripts/verify-release.sh candidate|indexed [ORIGIN-COMMIT]" >&2
+  exit 2
+fi
+
+mode=$1
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+crate_name=$(sed -n 's/^name = "\([^"]*\)"$/\1/p' "$project_root/alire.toml")
+version=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' "$project_root/alire.toml")
+
+if [ -z "$crate_name" ] || [ -z "$version" ]; then
+  echo "could not read the crate name and version from alire.toml" >&2
+  exit 1
+fi
+origin_commit=${2:-$(git -C "$project_root" rev-parse HEAD)}
+case "$origin_commit" in
+  *[!0-9a-f]* | '')
+    echo "release origin must be a lowercase full commit ID" >&2
+    exit 1
+    ;;
+esac
+if [ "${#origin_commit}" -ne 40 ] ||
+   [ "$(git -C "$project_root" rev-parse --verify "$origin_commit^{commit}" 2>/dev/null || true)" != "$origin_commit" ]; then
+  echo "release origin must be a canonical full commit ID: $origin_commit" >&2
+  exit 1
+fi
+git -C "$project_root" fetch --quiet origin main
+if ! git -C "$project_root" merge-base --is-ancestor "$origin_commit" refs/remotes/origin/main; then
+  echo "release origin is not reachable from public origin/main: $origin_commit" >&2
+  exit 1
+fi
+
+temporary_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-json-release.XXXXXX")
+cleanup() {
+  rm -rf -- "$temporary_root"
+}
+trap cleanup EXIT HUP INT TERM
+
+source_root="$temporary_root/source"
+mkdir -p "$source_root"
+git -C "$project_root" archive --format=tar "$origin_commit" | tar -xf - -C "$source_root"
+
+if find "$source_root" -name alire.lock -o -name alire.lock.yaml | grep . >/dev/null; then
+  echo "release archive contains a host-local Alire lock" >&2
+  exit 1
+fi
+if rg -n '^\[\[pins\]\]' "$source_root/alire.toml" >/dev/null; then
+  echo "release manifest contains a non-propagating pin" >&2
+  exit 1
+fi
+
+echo "Testing source archive for $crate_name=$version at $origin_commit"
+(
+  cd "$source_root"
+  alr --non-interactive test
+)
+
+settings_root="$temporary_root/alire-settings"
+mkdir -p "$settings_root"
+index_source=${FLYOLOGY_ALIRE_INDEX_SOURCE:-https://github.com/flyology-ada/alire-index.git}
+
+if [ "$mode" = candidate ]; then
+  index_root="$temporary_root/index"
+  git clone --quiet "$index_source" "$index_root"
+  manifest_directory="$index_root/index/fl/$crate_name"
+  manifest_path="$manifest_directory/$crate_name-$version.toml"
+  expected_manifest="$temporary_root/$crate_name-$version.toml"
+  cp "$source_root/alire.toml" "$expected_manifest"
+  {
+    printf '\n[origin]\n'
+    printf 'commit = "%s"\n' "$origin_commit"
+    printf 'url = "git+https://github.com/flyology-ada/flyology-json.git"\n'
+  } >>"$expected_manifest"
+  if [ -e "$manifest_path" ]; then
+    if ! cmp -s "$expected_manifest" "$manifest_path"; then
+      echo "published manifest differs from the release candidate: $manifest_path" >&2
+      exit 1
+    fi
+  else
+    mkdir -p "$manifest_directory"
+    cp "$expected_manifest" "$manifest_path"
+  fi
+  (
+    cd "$index_root"
+    alr --non-interactive --settings="$settings_root" index --check
+  )
+  alr --non-interactive --settings="$settings_root" index --reset-community
+  alr --non-interactive --settings="$settings_root" index \
+    --add="file:$index_root" --name=release-candidate --before=community
+  candidate_root="$temporary_root/candidate-downstream"
+  mkdir -p "$candidate_root"
+  (
+    cd "$candidate_root"
+    deployment=$(alr --non-interactive --settings="$settings_root" get --dirname "$crate_name=$version")
+    case "$deployment" in
+      /*) deployed_root=$deployment ;;
+      *) deployed_root="$candidate_root/$deployment" ;;
+    esac
+    if [ "$(git -C "$deployed_root" rev-parse HEAD)" != "$origin_commit" ]; then
+      echo "candidate index did not resolve the selected public source commit" >&2
+      exit 1
+    fi
+  )
+  echo "Candidate index manifest passed: $manifest_path"
+  exit 0
+fi
+
+alr --non-interactive --settings="$settings_root" index --reset-community
+alr --non-interactive --settings="$settings_root" index \
+  --add="git+$index_source" --name=flyology --before=community
+
+downstream_root="$temporary_root/downstream"
+mkdir -p "$downstream_root"
+(
+  cd "$downstream_root"
+  deployment=$(alr --non-interactive --settings="$settings_root" get --dirname "$crate_name=$version")
+  case "$deployment" in
+    /*) deployed_root=$deployment ;;
+    *) deployed_root="$downstream_root/$deployment" ;;
+  esac
+  if [ "$(git -C "$deployed_root" rev-parse HEAD)" != "$origin_commit" ]; then
+    echo "indexed deployment did not resolve the selected source commit" >&2
+    exit 1
+  fi
+  if rg -n '^\[\[pins\]\]' "$deployed_root/alire.toml" >/dev/null; then
+    echo "indexed deployment contains a non-propagating pin" >&2
+    exit 1
+  fi
+  cd "$deployed_root"
+  alr --non-interactive --settings="$settings_root" test
+)
+
+echo "Fresh indexed solve passed for $crate_name=$version at $origin_commit"
