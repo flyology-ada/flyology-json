@@ -47,7 +47,7 @@ jobs:
         run: |
           printf 'ALIRE_INSTALL_PREFIX=%s\n' "$RUNNER_TEMP/alire-prefix" >> "$GITHUB_ENV"
           alr install --prefix="$RUNNER_TEMP/alire-prefix" gnatdoc_bin=26.0.0
-          "$RUNNER_TEMP/alire-prefix/bin/gnatdoc" --version | \
+          "$RUNNER_TEMP/alire-prefix/bin/gnatdoc" --version 2>&1 | \
             sed -n '1{s/\r$//;p;}' | \
             grep -Fx 'GNATdoc 26.0.0 (20260415)'
       - name: Configure Pages
