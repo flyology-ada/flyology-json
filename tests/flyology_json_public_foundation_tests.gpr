@@ -1,0 +1,16 @@
+project Flyology_JSON_Public_Foundation_Tests is
+   for Source_Dirs use ("../src", ".");
+   for Object_Dir use "../obj/public-foundation-tests";
+   for Exec_Dir use "bin";
+   for Create_Missing_Dirs use "True";
+   for Main use ("flyology_json-public_foundation_tests.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnatwa", "-gnatwe", "-gnatVa", "-gnato13", "-gnatE", "-gnata", "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+end Flyology_JSON_Public_Foundation_Tests;
