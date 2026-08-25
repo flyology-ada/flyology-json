@@ -1,8 +1,9 @@
 # Parser baselines
 
-This isolated Alire subcrate measures the private, allocation-free Ada parser
-core. It is not a production dependency and does not add a native boundary to
-`flyology_json`. The only benchmark dependency is the indexed
+This isolated Alire subcrate measures the installed-shape, allocation-free Ada
+parser through public batched `Drain`. It is not a production dependency and
+does not add a native boundary to `flyology_json`. The only benchmark dependency
+is the indexed
 `flyology_bench = 0.1.1-dev` release; there is no Git or path pin. The isolated
 GPR project compiles the repository's `src/` units directly with its release
 switches so it cannot accidentally reuse the root workspace's development
@@ -12,9 +13,12 @@ checks to both the driver and the parser units.
 
 ## Workload
 
-One standalone-parser operation initializes a parser, validates one complete
-document, and drains all provisional events through `Next`. The comparison
-driver instead uses the parser core's private compact batch descriptor. That
+One standalone-parser operation initializes an explicit public parser profile,
+validates one complete document, and drains all provisional events directly
+into a 256-element benchmark-owned event buffer. That buffer is a measured
+caller publication batch, not a parser capacity or public default. The
+comparison driver instead uses the parser core's private compact batch
+descriptor. That
 descriptor carries event kind, exact source range, flags, and at most one
 decoded UTF-8 scalar; raw string and number text remains borrowed from the
 current caller input by count-based range and is never copied. Tests outside
@@ -39,10 +43,12 @@ The maintained synthetic fixtures exercise:
 Every fixture is measured monolithically and in 1, 16, 256, and 4096-octet
 chunks. Duplicate-name storage is derived from each fixture's maximum live
 object-name set rather than from a benchmark-wide default. A benchmark identity
-includes the exact input size, emitted-event count, `Next` call count, decoded
-name-octet capacity, name capacity, maximum depth, and compiler-reported parser
-state bytes. These values distinguish parser work and caller storage from
-transport scheduling without charging a counter hook inside the core.
+includes the exact input size, emitted-event count, public `Drain` call count,
+256-event caller publication capacity, compiler-reported caller event-array
+bytes, decoded name-octet capacity, name capacity, maximum depth, and
+compiler-reported parser state bytes. These values distinguish parser work and
+caller storage from transport scheduling without charging a counter hook
+inside the parser.
 
 This is a strict validation/event-draining lane, not a DOM construction,
 decoded-text materialization, numeric-conversion, or I/O benchmark. It includes
@@ -69,6 +75,15 @@ the distribution summary and host/toolchain metadata reported by
 sample record by itself.
 `csv` reports latency summaries; `metrics_csv` reports the selected resource
 axes. All three machine-readable modes omit interactive progress.
+
+The standalone parser executable also accepts benchmark-only exact selectors
+so a quiet performance gate need not run the complete matrix.
+`FLYOLOGY_JSON_BENCH_FIXTURE` accepts one fixture identifier from the list
+below, `FLYOLOGY_JSON_BENCH_CHUNK` accepts `monolith`, `1`, `16`, `256`, or
+`4096`, and `FLYOLOGY_JSON_BENCH_DUPLICATES` accepts `reject` or `preserve`.
+The maintained preserve lane is currently the name-heavy `large_object`
+fixture. Unset or empty selectors retain the complete default population;
+unknown or incompatible nonempty selectors fail before measurement.
 
 The comparison executable accepts benchmark-only exact-match selectors for
 targeted profiling. `FLYOLOGY_JSON_BENCH_IMPLEMENTATION` accepts one maintained
@@ -133,7 +148,7 @@ and exact benchmark-only source attestations. External libraries never become
 dependencies of the production `flyology_json` crate.
 
 Pull-request CI builds and tests both adapter tracks on macOS and Linux. The
-weekly workflow then runs both the 40-population Flyology chunk-schedule matrix
+weekly workflow then runs both the 45-population Flyology chunk-schedule matrix
 and the 63-population cross-implementation matrix. It retains each JSONL
 distribution summary, a derived TSV, explicit skips, toolchain and host output,
 capabilities, exact generated fixtures, source and license locks, harness
@@ -142,7 +157,10 @@ verbose GPR build log, and an artifact-wide SHA-256 manifest. GitHub-hosted
 runner measurements are always classified as `directional`; they are not a
 formal regression scorecard.
 
-The parser matrix fixes semantic fixture, chunk, event, and call identities.
+The parser matrix fixes semantic fixture, chunk, event, call, public `Drain`
+event-capacity, and caller event-array byte identities. The standalone public
+lane uses 256 events (6,144 caller bytes on the reviewed 64-bit targets); a
+change starts a distinct population.
 The comparison driver's 256-element descriptor buffer is an explicit benchmark
 experiment size, not a parser capacity or public default. `parser_bytes`
 remains a positive measured field in every record, but is not an exact

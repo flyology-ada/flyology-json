@@ -4,8 +4,11 @@
 The bounded core uses caller-provided storage, performs no heap allocation, and
 reports malformed input and resource failure without raising exceptions.
 
-The project is in its initial architecture milestone. The public Ada API is not
-implemented or released yet.
+The project is in its initial implementation milestone. The allocation-free
+public streaming parser, token collector, and checked integer conversion layers
+are implemented but not released yet. The public transactional writer is still
+under API review. No downstream should add a dependency until the reviewed
+`0.1.0-dev` release is available from the Flyology Alire index.
 
 ## Boundaries
 

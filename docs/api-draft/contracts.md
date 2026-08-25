@@ -1,7 +1,10 @@
-# Draft public contracts
+# Public contract review source
 
-These contracts govern the compile-checked declarations in this directory.
-They are review artifacts until moved into `src`; they are not installed API.
+For declarations already present under `src`, the installed Ada specification
+is the normative API and contains the closed lifecycle, payload, and capacity
+rules needed by a downstream caller.  This document supplies expanded rationale
+and review tables for those rules.  A declaration that exists only in
+`docs/api-draft` remains a review artifact and is not installed API.
 
 ## Operation ownership
 
@@ -270,8 +273,13 @@ quote. Offset exhaustion reports the first unrepresentable position.
 
 Parser error classification and same-position precedence are closed as follows:
 
-- at a value start, `n`, `t`, and `f` select literal validation; a later
-  mismatch is `Invalid_Literal`. Minus or a decimal digit selects number
+- under `Require_Object`, recognizing `[`, `"`, `n`, `t`, `f`, minus, or a
+  decimal digit as a non-object root leader first returns
+  `Top_Level_Kind_Rejected` before consuming that leader or validating the rest
+  of that token. A byte that cannot begin any JSON value remains
+  `Unexpected_Token`;
+- otherwise, at a value start, `n`, `t`, and `f` select literal validation; a
+  later mismatch is `Invalid_Literal`. Minus or a decimal digit selects number
   validation; a rejected DFA transition is `Invalid_Number`. Another byte that
   cannot begin a value is `Unexpected_Token`;
 - after a reverse solidus, an unknown escape or malformed `\u` spelling is

@@ -213,7 +213,7 @@ procedure Flyology_JSON.Parser_Unicode_Escape_Tests is
    end Drain;
 
    function Parse (Document : String; Split : Natural) return Scalar_Observation is
-      Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity);
+      Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity, Core.Reject_Duplicates);
       Seen   : Scalar_Observation;
    begin
       Core.Initialize (Parser);
@@ -239,7 +239,7 @@ procedure Flyology_JSON.Parser_Unicode_Escape_Tests is
    end Parse;
 
    function Parse_One_Byte (Document : String) return Scalar_Observation is
-      Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity);
+      Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity, Core.Reject_Duplicates);
       Seen   : Scalar_Observation;
    begin
       Core.Initialize (Parser);

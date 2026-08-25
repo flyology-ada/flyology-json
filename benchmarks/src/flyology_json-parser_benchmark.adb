@@ -9,22 +9,31 @@ with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Flyology_Bench;
 with Flyology_Bench.Reporters;
-with Flyology_JSON.Parser_Core;
+with Flyology_JSON.Errors;
+with Flyology_JSON.Parsing;
+with Flyology_JSON.Profiles;
 with Interfaces;
 with System;
 
 procedure Flyology_JSON.Parser_Benchmark is
-   package Core renames Flyology_JSON.Parser_Core;
+   package Profiles renames Flyology_JSON.Profiles;
+   package Strict_Parsing is new Flyology_JSON.Parsing (Profiles.Reject_Duplicates);
+   package Preserve_Parsing is new Flyology_JSON.Parsing (Profiles.Preserve_Unchecked);
    package Unbounded renames Ada.Strings.Unbounded;
 
    use type Ada.Streams.Stream_Element_Offset;
-   use type Core.Next_Outcome;
    use type Flyology_Bench.Iteration_Count;
+   use type Flyology_JSON.Errors.Error_Code;
    use type Interfaces.Unsigned_64;
+   use type Profiles.Duplicate_Policy;
 
    subtype Count is Ada.Streams.Stream_Element_Count;
    subtype Offset is Ada.Streams.Stream_Element_Offset;
    subtype U64 is Interfaces.Unsigned_64;
+
+   --  This caller-selected publication batch is part of the benchmark
+   --  population identity.  It is not a parser capacity or public default.
+   Drain_Event_Capacity : constant Positive := 256;
 
    type Octet_Array_Access is access all Ada.Streams.Stream_Element_Array;
 
@@ -267,30 +276,48 @@ procedure Flyology_JSON.Parser_Benchmark is
          when Two_Fifty_Six_Octets            => "256",
          when Four_Thousand_Ninety_Six_Octets => "4096");
 
-   procedure Mix_Event
-     (Value : Core.Event;
-      Into  : in out U64) is
-   begin
-      --  Keep event results observable with minimal consumer work.  Collision
-      --  resistance is irrelevant to this post-timestamp result barrier.
-      Into := Into + U64 (Core.Event_Kind'Pos (Value.Kind) + 1);
-      Into := Into + U64 (Value.Source.First);
-      Into := Into + U64 (Value.Source.Octet_Length);
-   end Mix_Event;
-
-   procedure Parse_Once
+   generic
+      Duplicate_Handling : Profiles.Duplicate_Policy;
+      with package Parser_API is new Flyology_JSON.Parsing (Duplicate_Handling);
+   procedure Parse_Mode_Once
      (Item        : Fixture;
       Chunk       : Chunk_Kind;
-      Observation : out Parse_Observation) is
-      Parser         : Core.Parser
+      Observation : out Parse_Observation);
+
+   procedure Parse_Mode_Once
+     (Item        : Fixture;
+      Chunk       : Chunk_Kind;
+      Observation : out Parse_Observation)
+   is
+      Effective_Name_Octets : constant Natural :=
+        (if Duplicate_Handling = Profiles.Preserve_Unchecked
+         then 0
+         else Item.Name_Octet_Capacity);
+      Effective_Names : constant Natural :=
+        (if Duplicate_Handling = Profiles.Preserve_Unchecked then 0 else Item.Name_Capacity);
+      Parser         : Parser_API.Parser
         (Maximum_Depth       => Item.Maximum_Depth,
-         Name_Octet_Capacity => Item.Name_Octet_Capacity,
-         Name_Capacity       => Item.Name_Capacity);
+         Name_Octet_Capacity => Effective_Name_Octets,
+         Name_Capacity       => Effective_Names);
+      --  This benchmark-owned buffer is an explicit publication batch, not a
+      --  parser capacity or public API default.
+      Events         : Parser_API.Event_Array (1 .. Offset (Drain_Event_Capacity));
       Position       : Count := 0;
       Effective_Size : constant Count := Chunk_Octets (Chunk, Item.Data'Length);
+      Diagnostic     : Flyology_JSON.Errors.Diagnostic;
+      Profile        : constant Profiles.Parser_Profile :=
+        (Syntax        => (Family => Profiles.RFC_8259, Version => 1),
+         Unicode       => (Family => Profiles.Unicode_Scalars, Version => 1),
+         Compatibility => (Family => Profiles.No_Extensions, Version => 1),
+         BOM           => Profiles.Reject_BOM,
+         Duplicates    => Duplicate_Handling,
+         Top_Level     => Profiles.Accept_Any_Value);
    begin
       Observation := (others => <>);
-      Core.Initialize (Parser);
+      Parser_API.Initialize (Parser, Profile, Diagnostic);
+      if Diagnostic.Code /= Flyology_JSON.Errors.No_Error then
+         raise Program_Error with "benchmark parser initialization failed";
+      end if;
 
       loop
          declare
@@ -298,7 +325,7 @@ procedure Flyology_JSON.Parser_Benchmark is
             Current_Size : constant Count := Count'Min (Effective_Size, Remaining);
             Used         : Count := 0;
             Final_Chunk  : constant Boolean := Current_Size = Remaining;
-            Result       : Core.Next_Result;
+            Result       : Parser_API.Drain_Result;
          begin
             loop
                Observation.Calls := Observation.Calls + 1;
@@ -309,20 +336,22 @@ procedure Flyology_JSON.Parser_Benchmark is
                      Last  : constant Offset :=
                        Item.Data'First + Offset (Position + Current_Size) - 1;
                   begin
-                     Core.Next
+                     Parser_API.Drain
                        (Parser,
                         Item.Data (First .. Last),
                         End_Of_Input => Final_Chunk,
+                        Events       => Events,
                         Result       => Result);
                   end;
                else
                   declare
                      Empty : Ada.Streams.Stream_Element_Array (1 .. 0);
                   begin
-                     Core.Next
+                     Parser_API.Drain
                        (Parser,
                         Empty,
                         End_Of_Input => Final_Chunk,
+                        Events       => Events,
                         Result       => Result);
                   end;
                end if;
@@ -332,19 +361,37 @@ procedure Flyology_JSON.Parser_Benchmark is
                end if;
                Used := Used + Result.Consumed;
 
-               case Result.Outcome is
-                  when Core.Event_Ready =>
-                     Observation.Events := Observation.Events + 1;
-                     Mix_Event (Result.Item, Observation.Checksum);
+               if Result.Produced > 0 then
+                  for Published in Count range 0 .. Result.Produced - 1 loop
+                     declare
+                        Value  : Parser_API.Event renames
+                          Events (Events'First + Offset (Published));
+                        Source : constant Parser_API.Source_Range := Parser_API.Source (Value);
+                     begin
+                        Observation.Events := Observation.Events + 1;
+                        --  Keep event results observable with minimal consumer
+                        --  work after direct publication into caller storage.
+                        Observation.Checksum :=
+                          Observation.Checksum
+                          + U64 (Parser_API.Event_Kind'Pos (Parser_API.Kind (Value)) + 1)
+                          + U64 (Source.First)
+                          + U64 (Source.Octet_Length);
+                     end;
+                  end loop;
+               end if;
 
-                  when Core.Need_Input =>
+               case Result.Stop is
+                  when Parser_API.Output_Full =>
+                     null;
+
+                  when Parser_API.Drain_Need_Input =>
                      if Used /= Current_Size or else Final_Chunk then
                         raise Program_Error with "parser requested input at an invalid boundary";
                      end if;
                      Position := Position + Current_Size;
                      exit;
 
-                  when Core.Document_Complete =>
+                  when Parser_API.Drain_Document_Complete =>
                      if not Final_Chunk
                        or else Position + Used /= Item.Data'Length
                      then
@@ -352,18 +399,26 @@ procedure Flyology_JSON.Parser_Benchmark is
                      end if;
                      return;
 
-                  when Core.Parse_Failed =>
+                  when Parser_API.Drain_Failed =>
                      raise Program_Error with
                        "valid benchmark fixture failed at offset"
-                       & Core.Byte_Offset'Image (Result.Diagnostic.Offset);
+                       & Flyology_JSON.Errors.Byte_Offset'Image (Result.Diagnostic.Offset);
 
-                  when Core.Call_Rejected =>
+                  when Parser_API.Drain_Rejected =>
                      raise Program_Error with "parser rejected a valid benchmark call";
                end case;
             end loop;
          end;
       end loop;
-   end Parse_Once;
+   end Parse_Mode_Once;
+
+   procedure Parse_Once is new Parse_Mode_Once
+     (Duplicate_Handling => Profiles.Reject_Duplicates,
+      Parser_API         => Strict_Parsing);
+
+   procedure Parse_Preserve_Once is new Parse_Mode_Once
+     (Duplicate_Handling => Profiles.Preserve_Unchecked,
+      Parser_API         => Preserve_Parsing);
 
    Current_Fixture : Fixture_Kind := Fixture_Kind'First;
    Current_Chunk   : Chunk_Kind := Chunk_Kind'First;
@@ -382,6 +437,22 @@ procedure Flyology_JSON.Parser_Benchmark is
 
    procedure Measure_Parser is new Flyology_Bench.Measure_Result_Batched
      (Element => U64, Batch => Parse_Batch);
+
+   procedure Parse_Preserve_Batch
+     (Iterations : Flyology_Bench.Iteration_Count;
+      Value      : out U64)
+   is
+      Observation : Parse_Observation;
+   begin
+      Value := 0;
+      for Iteration in Flyology_Bench.Iteration_Count range 1 .. Iterations loop
+         Parse_Preserve_Once (Fixtures (Current_Fixture), Current_Chunk, Observation);
+         Value := Value + Observation.Checksum;
+      end loop;
+   end Parse_Preserve_Batch;
+
+   procedure Measure_Preserve_Parser is new Flyology_Bench.Measure_Result_Batched
+     (Element => U64, Batch => Parse_Preserve_Batch);
 
    --  Fixed statistical policy for comparable retained baselines.  The zero
    --  sampling cap means disabled, so all 50 requested samples are retained.
@@ -403,9 +474,57 @@ procedure Flyology_JSON.Parser_Benchmark is
    Dump_Preflight : constant Boolean :=
      Ada.Environment_Variables.Value
        ("FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY", Default => "false") = "true";
+   Fixture_Selector : constant String :=
+     Ada.Environment_Variables.Value
+       ("FLYOLOGY_JSON_BENCH_FIXTURE", Default => "");
+   Chunk_Selector : constant String :=
+     Ada.Environment_Variables.Value
+       ("FLYOLOGY_JSON_BENCH_CHUNK", Default => "");
+   Duplicate_Selector : constant String :=
+     Ada.Environment_Variables.Value
+       ("FLYOLOGY_JSON_BENCH_DUPLICATES", Default => "");
+
+   function Fixture_Name (Kind : Fixture_Kind) return String
+   is (Unbounded.To_String (Fixtures (Kind).Name));
+
+   function Fixture_Selected (Kind : Fixture_Kind) return Boolean
+   is (Fixture_Selector = "" or else Fixture_Selector = Fixture_Name (Kind));
+
+   function Chunk_Selected (Kind : Chunk_Kind) return Boolean
+   is (Chunk_Selector = "" or else Chunk_Selector = Chunk_Name (Kind));
+
+   function Duplicate_Selected (Preserve : Boolean) return Boolean
+   is (Duplicate_Selector = ""
+       or else Duplicate_Selector = (if Preserve then "preserve" else "reject"));
+
+   function Known_Fixture_Selector return Boolean is
+   begin
+      if Fixture_Selector = "" then
+         return True;
+      end if;
+      for Kind in Fixture_Kind loop
+         if Fixture_Selector = Fixture_Name (Kind) then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Known_Fixture_Selector;
+
+   function Known_Chunk_Selector return Boolean is
+   begin
+      if Chunk_Selector = "" then
+         return True;
+      end if;
+      for Kind in Chunk_Kind loop
+         if Chunk_Selector = Chunk_Name (Kind) then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Known_Chunk_Selector;
 
    function Parser_Storage_Bytes (Item : Fixture) return Natural is
-      Parser : Core.Parser
+      Parser : Strict_Parsing.Parser
         (Maximum_Depth       => Item.Maximum_Depth,
          Name_Octet_Capacity => Item.Name_Octet_Capacity,
          Name_Capacity       => Item.Name_Capacity);
@@ -413,27 +532,125 @@ procedure Flyology_JSON.Parser_Benchmark is
       return (Parser'Size + System.Storage_Unit - 1) / System.Storage_Unit;
    end Parser_Storage_Bytes;
 
+   function Preserve_Parser_Storage_Bytes (Item : Fixture) return Natural is
+      Parser : Preserve_Parsing.Parser
+        (Maximum_Depth       => Item.Maximum_Depth,
+         Name_Octet_Capacity => 0,
+         Name_Capacity       => 0);
+   begin
+      return (Parser'Size + System.Storage_Unit - 1) / System.Storage_Unit;
+   end Preserve_Parser_Storage_Bytes;
+
+   function Strict_Caller_Event_Bytes return Natural
+   is
+     ((Drain_Event_Capacity * Strict_Parsing.Event_Array'Component_Size
+       + System.Storage_Unit - 1)
+      / System.Storage_Unit);
+
+   function Preserve_Caller_Event_Bytes return Natural
+   is
+     ((Drain_Event_Capacity * Preserve_Parsing.Event_Array'Component_Size
+       + System.Storage_Unit - 1)
+      / System.Storage_Unit);
+
    function Benchmark_Name
      (Item        : Fixture;
       Chunk       : Chunk_Kind;
-      Observation : Parse_Observation) return String is
+      Observation : Parse_Observation;
+      Preserve    : Boolean) return String is
    begin
       return
-        "parser_validation/" & Unbounded.To_String (Item.Name)
+        "parser_validation/api=public_drain/" & Unbounded.To_String (Item.Name)
+        & "/duplicates=" & (if Preserve then "preserve" else "reject")
         & "/chunk=" & Chunk_Name (Chunk)
         & "/bytes=" & Trimmed_Image (Natural (Item.Data'Length))
         & "/depth=" & Trimmed_Image (Item.Maximum_Depth)
         & "/events=" & Trimmed_Image (Observation.Events)
         & "/calls=" & Trimmed_Image (Observation.Calls)
-        & "/parser_bytes=" & Trimmed_Image (Parser_Storage_Bytes (Item))
-        & "/name_octets=" & Trimmed_Image (Item.Name_Octet_Capacity)
-        & "/names=" & Trimmed_Image (Item.Name_Capacity);
+        & "/drain_event_capacity=" & Trimmed_Image (Drain_Event_Capacity)
+        & "/caller_event_bytes="
+        & Trimmed_Image
+            ((if Preserve then Preserve_Caller_Event_Bytes else Strict_Caller_Event_Bytes))
+        & "/parser_bytes="
+        & Trimmed_Image
+            ((if Preserve then Preserve_Parser_Storage_Bytes (Item) else Parser_Storage_Bytes (Item)))
+        & "/name_octets=" & Trimmed_Image ((if Preserve then 0 else Item.Name_Octet_Capacity))
+        & "/names=" & Trimmed_Image ((if Preserve then 0 else Item.Name_Capacity));
    end Benchmark_Name;
+
+   procedure Run_Benchmark
+     (Kind     : Fixture_Kind;
+      Chunk    : Chunk_Kind;
+      Preserve : Boolean)
+   is
+      Item        : Fixture renames Fixtures (Kind);
+      Observation : Parse_Observation;
+      Result      : Flyology_Bench.Measurement;
+   begin
+      if Preserve then
+         Parse_Preserve_Once (Item, Chunk, Observation);
+      else
+         Parse_Once (Item, Chunk, Observation);
+      end if;
+      Current_Fixture := Kind;
+      Current_Chunk := Chunk;
+
+      declare
+         Name   : constant String := Benchmark_Name (Item, Chunk, Observation, Preserve);
+         Config : constant Flyology_Bench.Configuration :=
+           (if Output_Mode = "terminal"
+            then Flyology_Bench.Reporters.Terminal_Mode (Base_Config, Name)
+            else Base_Config);
+      begin
+         if Dump_Preflight then
+            Ada.Text_IO.Put_Line (Name);
+         else
+            if Preserve then
+               Measure_Preserve_Parser (Config => Config, Result => Result);
+            else
+               Measure_Parser (Config => Config, Result => Result);
+            end if;
+            if Output_Mode = "terminal" then
+               Flyology_Bench.Reporters.Put_Console (Name, Result);
+               Ada.Text_IO.Put_Line
+                 ("  median throughput:"
+                  & Long_Float'Image
+                      (Long_Float (Item.Data'Length) * 1_000_000_000.0
+                       / Flyology_Bench.Median_Nanoseconds (Result)
+                       / 1_048_576.0)
+                  & " MiB/s");
+            elsif Output_Mode = "csv" then
+               Flyology_Bench.Reporters.Put_CSV (Name, Result);
+            elsif Output_Mode = "metrics_csv" then
+               Flyology_Bench.Reporters.Put_Metrics_CSV (Name, Result);
+            else
+               Flyology_Bench.Reporters.Put_JSON (Name, Result);
+            end if;
+         end if;
+      end;
+   end Run_Benchmark;
 
 begin
    if Output_Mode not in "terminal" | "csv" | "metrics_csv" | "json" then
       raise Constraint_Error with
         "FLYOLOGY_JSON_BENCH_OUTPUT must be terminal, csv, metrics_csv, or json";
+   end if;
+   if not Known_Fixture_Selector then
+      raise Constraint_Error with "unknown FLYOLOGY_JSON_BENCH_FIXTURE selector";
+   end if;
+   if not Known_Chunk_Selector then
+      raise Constraint_Error with "unknown FLYOLOGY_JSON_BENCH_CHUNK selector";
+   end if;
+   if Duplicate_Selector not in "" | "reject" | "preserve" then
+      raise Constraint_Error with
+        "FLYOLOGY_JSON_BENCH_DUPLICATES must be reject or preserve";
+   end if;
+   if Duplicate_Selector = "preserve"
+     and then Fixture_Selector /= ""
+     and then Fixture_Selector /= "large_object"
+   then
+      raise Constraint_Error with
+        "the maintained preserve lane is available only for large_object";
    end if;
 
    if not Dump_Preflight and then Output_Mode = "csv" then
@@ -444,45 +661,23 @@ begin
 
    for Kind in Fixture_Kind loop
       for Chunk in Chunk_Kind loop
-         declare
-            Item        : Fixture renames Fixtures (Kind);
-            Observation : Parse_Observation;
-            Result      : Flyology_Bench.Measurement;
-         begin
-            Parse_Once (Item, Chunk, Observation);
-            Current_Fixture := Kind;
-            Current_Chunk := Chunk;
-
-            declare
-               Name : constant String := Benchmark_Name (Item, Chunk, Observation);
-               Config : constant Flyology_Bench.Configuration :=
-                 (if Output_Mode = "terminal"
-                  then Flyology_Bench.Reporters.Terminal_Mode (Base_Config, Name)
-                  else Base_Config);
-            begin
-               if Dump_Preflight then
-                  Ada.Text_IO.Put_Line (Name);
-               else
-                  Measure_Parser (Config => Config, Result => Result);
-                  if Output_Mode = "terminal" then
-                     Flyology_Bench.Reporters.Put_Console (Name, Result);
-                     Ada.Text_IO.Put_Line
-                       ("  median throughput:"
-                        & Long_Float'Image
-                            (Long_Float (Item.Data'Length) * 1_000_000_000.0
-                             / Flyology_Bench.Median_Nanoseconds (Result)
-                             / 1_048_576.0)
-                        & " MiB/s");
-                  elsif Output_Mode = "csv" then
-                     Flyology_Bench.Reporters.Put_CSV (Name, Result);
-                  elsif Output_Mode = "metrics_csv" then
-                     Flyology_Bench.Reporters.Put_Metrics_CSV (Name, Result);
-                  else
-                     Flyology_Bench.Reporters.Put_JSON (Name, Result);
-                  end if;
-               end if;
-            end;
-         end;
+         if Fixture_Selected (Kind)
+           and then Chunk_Selected (Chunk)
+           and then Duplicate_Selected (Preserve => False)
+         then
+            Run_Benchmark (Kind, Chunk, Preserve => False);
+         end if;
       end loop;
+   end loop;
+
+   --  Preserve_Unchecked is a distinct static parser shape.  The name-heavy
+   --  object lane proves its zero-capacity path without doubling every fixture.
+   for Chunk in Chunk_Kind loop
+      if Fixture_Selected (Large_Object)
+        and then Chunk_Selected (Chunk)
+        and then Duplicate_Selected (Preserve => True)
+      then
+         Run_Benchmark (Large_Object, Chunk, Preserve => True);
+      end if;
    end loop;
 end Flyology_JSON.Parser_Benchmark;

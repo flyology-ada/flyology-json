@@ -20,6 +20,14 @@ done
 alr exec -- gprbuild -f -p -j0 -P tests/flyology_json_public_foundation_tests.gpr
 "$project_root/tests/bin/flyology_json-public_foundation_tests"
 
+alr exec -- gprbuild -f -p -j0 -P tests/flyology_json_public_parsing_tests.gpr
+"$project_root/tests/bin/flyology_json-public_parsing_tests"
+
+alr exec -- gprbuild -f -p -j0 -P tests/flyology_json_external_consumer_smoke.gpr
+"$project_root/tests/bin/flyology_json_external_consumer_smoke"
+
+"$project_root/scripts/check-public-parser-assembly.sh"
+
 alr exec -- gprbuild -f -p -j0 -P tests/flyology_json_writer_core_tests.gpr
 "$project_root/tests/bin/flyology_json-writer_core_tests"
 

@@ -1,9 +1,10 @@
 # Public API draft
 
-These Ada specifications are the reviewed target declarations. Public
-foundation packages are now being moved into `src/`; parser, writer, unsigned,
-and binary64 declarations remain architecture artifacts until their matching
-implementations and consumer reviews are complete.
+These Ada specifications are reviewed target declarations. Public foundation,
+parser, token-collector, and signed/unsigned integer packages with matching
+implementations are installed in `src/`. A declaration that is absent from
+`src/` remains an architecture artifact until its implementation and consumer
+reviews are complete.
 
 The drafts intentionally contain no implementation bodies and no public
 capacity, budget, profile, or policy defaults.  The trusted parser and writer

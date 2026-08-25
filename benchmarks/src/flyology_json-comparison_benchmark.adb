@@ -351,42 +351,50 @@ procedure Flyology_JSON.Comparison_Benchmark is
      aliased Core.Parser
                (Maximum_Depth => Fixtures (Small_Mixed).Maximum_Depth,
                 Name_Octet_Capacity => Fixtures (Small_Mixed).Name_Octet_Capacity,
-                Name_Capacity => Fixtures (Small_Mixed).Name_Capacity);
+                Name_Capacity => Fixtures (Small_Mixed).Name_Capacity,
+                Duplicate_Handling => Core.Reject_Duplicates);
    Large_Mixed_Parser   :
      aliased Core.Parser
                (Maximum_Depth => Fixtures (Large_Mixed).Maximum_Depth,
                 Name_Octet_Capacity => Fixtures (Large_Mixed).Name_Octet_Capacity,
-                Name_Capacity => Fixtures (Large_Mixed).Name_Capacity);
+                Name_Capacity => Fixtures (Large_Mixed).Name_Capacity,
+                Duplicate_Handling => Core.Reject_Duplicates);
    String_Heavy_Parser  :
      aliased Core.Parser
                (Maximum_Depth => Fixtures (String_Heavy).Maximum_Depth,
                 Name_Octet_Capacity => Fixtures (String_Heavy).Name_Octet_Capacity,
-                Name_Capacity => Fixtures (String_Heavy).Name_Capacity);
+                Name_Capacity => Fixtures (String_Heavy).Name_Capacity,
+                Duplicate_Handling => Core.Reject_Duplicates);
    Number_Heavy_Parser  :
      aliased Core.Parser
                (Maximum_Depth => Fixtures (Number_Heavy).Maximum_Depth,
                 Name_Octet_Capacity => Fixtures (Number_Heavy).Name_Octet_Capacity,
-                Name_Capacity => Fixtures (Number_Heavy).Name_Capacity);
+                Name_Capacity => Fixtures (Number_Heavy).Name_Capacity,
+                Duplicate_Handling => Core.Reject_Duplicates);
    Long_Mantissa_Parser :
      aliased Core.Parser
                (Maximum_Depth => Fixtures (Long_Mantissa_Numbers).Maximum_Depth,
                 Name_Octet_Capacity => Fixtures (Long_Mantissa_Numbers).Name_Octet_Capacity,
-                Name_Capacity => Fixtures (Long_Mantissa_Numbers).Name_Capacity);
+                Name_Capacity => Fixtures (Long_Mantissa_Numbers).Name_Capacity,
+                Duplicate_Handling => Core.Reject_Duplicates);
    Deep_Nesting_Parser  :
      aliased Core.Parser
                (Maximum_Depth => Fixtures (Deep_Nesting).Maximum_Depth,
                 Name_Octet_Capacity => Fixtures (Deep_Nesting).Name_Octet_Capacity,
-                Name_Capacity => Fixtures (Deep_Nesting).Name_Capacity);
+                Name_Capacity => Fixtures (Deep_Nesting).Name_Capacity,
+                Duplicate_Handling => Core.Reject_Duplicates);
    Large_Array_Parser   :
      aliased Core.Parser
                (Maximum_Depth => Fixtures (Large_Array).Maximum_Depth,
                 Name_Octet_Capacity => Fixtures (Large_Array).Name_Octet_Capacity,
-                Name_Capacity => Fixtures (Large_Array).Name_Capacity);
+                Name_Capacity => Fixtures (Large_Array).Name_Capacity,
+                Duplicate_Handling => Core.Reject_Duplicates);
    Large_Object_Parser  :
      aliased Core.Parser
                (Maximum_Depth => Fixtures (Large_Object).Maximum_Depth,
                 Name_Octet_Capacity => Fixtures (Large_Object).Name_Octet_Capacity,
-                Name_Capacity => Fixtures (Large_Object).Name_Capacity);
+                Name_Capacity => Fixtures (Large_Object).Name_Capacity,
+                Duplicate_Handling => Core.Reject_Duplicates);
 
    --  Retain caller-backed parser storage per fixture across operations just
    --  as the foreign event adapter retains its reader.  Untimed preflight

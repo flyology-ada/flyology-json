@@ -65,7 +65,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
    procedure Check_Literal_Offset_Boundaries is
    begin
       declare
-         Subject : Parser (0, 0, 0);
+         Subject : Parser (0, 0, 0, Reject_Duplicates);
          Input   : constant Ada.Streams.Stream_Element_Array :=
            [Offset (-11) => Character'Pos ('n'),
             Offset (-10) => Character'Pos ('u'),
@@ -82,7 +82,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
 
       declare
-         Subject : Parser (0, 0, 0);
+         Subject : Parser (0, 0, 0, Reject_Duplicates);
          Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("null", -13);
          Item    : Next_Result;
       begin
@@ -95,7 +95,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
 
       declare
-         Subject : Parser (0, 0, 0);
+         Subject : Parser (0, 0, 0, Reject_Duplicates);
          Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("false", -17);
          Item    : Next_Result;
       begin
@@ -110,7 +110,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
 
       declare
-         Subject : Parser (0, 0, 0);
+         Subject : Parser (0, 0, 0, Reject_Duplicates);
          Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("false", -21);
          Item    : Next_Result;
       begin
@@ -123,7 +123,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
 
       declare
-         Subject : Parser (0, 0, 0);
+         Subject : Parser (0, 0, 0, Reject_Duplicates);
          Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("nXll", 19);
          Item    : Next_Result;
       begin
@@ -136,7 +136,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
 
       declare
-         Subject : Parser (0, 0, 0);
+         Subject : Parser (0, 0, 0, Reject_Duplicates);
          Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("nulX", 23);
          Item    : Next_Result;
       begin
@@ -149,7 +149,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
 
       declare
-         Subject : Parser (0, 0, 0);
+         Subject : Parser (0, 0, 0, Reject_Duplicates);
          Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("nullx", -31);
          Item    : Next_Result;
       begin
@@ -162,7 +162,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
 
       declare
-         Subject : Parser (0, 0, 0);
+         Subject : Parser (0, 0, 0, Reject_Duplicates);
          Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("null ", -37);
          Item    : Next_Result;
       begin
@@ -187,7 +187,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       Input : constant Ada.Streams.Stream_Element_Array := To_Input ("null ", -47);
    begin
       declare
-         Subject : Parser (0, 0, 0);
+         Subject : Parser (0, 0, 0, Reject_Duplicates);
          Events  : Event_Array (11 .. 18);
          Item    : Drain_Result;
       begin
@@ -204,7 +204,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
 
       declare
-         Subject : Parser (0, 0, 0);
+         Subject : Parser (0, 0, 0, Reject_Duplicates);
          Events  : Event_Array (-13 .. -12);
          Item    : Drain_Result;
       begin
@@ -240,7 +240,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end Prepare;
    begin
       declare
-         Subject : Parser (1, 0, 0);
+         Subject : Parser (1, 0, 0, Reject_Duplicates);
          Events  : Event_Array (-5 .. 2);
          Item    : Drain_Result;
       begin
@@ -261,7 +261,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
 
       declare
-         Subject : Parser (1, 0, 0);
+         Subject : Parser (1, 0, 0, Reject_Duplicates);
          Events  : Event_Array (17 .. 24);
          Item    : Drain_Result;
       begin
@@ -279,7 +279,7 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
    end Check_Dense_Zero_Offset_Boundaries;
 
    --  Explicit storage for the reset fixture; these values are not defaults.
-   Self        : Parser (1, 16, 4);
+   Self        : Parser (1, 16, 4, Reject_Duplicates);
    Result      : Next_Result;
    Empty       : Ada.Streams.Stream_Element_Array (1 .. 0);
    Last_Byte   : constant Ada.Streams.Stream_Element_Array := [Offset (37) => Character'Pos (' ')];

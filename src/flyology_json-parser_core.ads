@@ -6,14 +6,18 @@ with Interfaces;
 
 --  Bounded, allocation-free incremental parser mechanism.
 --
---  This is the private strict-engine boundary.  Exact duplicate-name rejection
---  is intrinsic here; future compatibility/reporting engines require their own
---  reviewed mechanism before a public profile can select them.  This package
---  deliberately contains no resource-accounting hooks.
+--  This is the private engine boundary.  Duplicate handling is selected by a
+--  parser discriminant so a public generic instance can statically select the
+--  strict or preserve mechanism.  This package deliberately contains no
+--  resource-accounting hooks.
 
 private package Flyology_JSON.Parser_Core is
 
    subtype Byte_Offset is Interfaces.Unsigned_64;
+
+   type Duplicate_Mode is (Reject_Duplicates, Preserve_Unchecked);
+
+   type Root_Policy is (Accept_Any, Require_Object);
 
    type Parser_State is (Uninitialized, Ready, Active, Failure_Pending, Completed, Failed, Aborted);
 
@@ -81,6 +85,7 @@ private package Flyology_JSON.Parser_Core is
      (No_Error,
       Invalid_State,
       Unexpected_Token,
+      Top_Level_Kind_Rejected,
       Trailing_Input,
       Truncated_Input,
       Invalid_Literal,
@@ -93,7 +98,8 @@ private package Flyology_JSON.Parser_Core is
       Depth_Exhausted,
       Name_Storage_Exhausted,
       Duplicate_Index_Exhausted,
-      Offset_Exhausted);
+      Offset_Exhausted,
+      Final_Input_Retracted);
 
    type Diagnostic is record
       Code   : Error_Code;
@@ -104,6 +110,7 @@ private package Flyology_JSON.Parser_Core is
 
    type Next_Result is record
       Outcome    : Next_Outcome;
+      Input_First : Byte_Offset;
       Consumed   : Ada.Streams.Stream_Element_Count;
       Item       : Event;
       Diagnostic : Parser_Core.Diagnostic;
@@ -116,6 +123,7 @@ private package Flyology_JSON.Parser_Core is
 
    type Drain_Result is record
       Stop       : Drain_Stop;
+      Input_First : Byte_Offset;
       Consumed   : Ada.Streams.Stream_Element_Count;
       Produced   : Ada.Streams.Stream_Element_Count;
       Diagnostic : Parser_Core.Diagnostic;
@@ -124,13 +132,18 @@ private package Flyology_JSON.Parser_Core is
    type Parser
      (Maximum_Depth       : Natural;
       Name_Octet_Capacity : Natural;
-      Name_Capacity       : Natural)
+      Name_Capacity       : Natural;
+      Duplicate_Handling  : Duplicate_Mode)
    is
      limited private;
 
    --  Initialize changes an Uninitialized parser to Ready.  In another state
    --  it is a nonraising no-op.
    procedure Initialize (Self : in out Parser);
+
+   --  Freeze the top-level policy for this operation.  Root-policy rejection
+   --  occurs before consuming the first non-whitespace root octet.
+   procedure Initialize (Self : in out Parser; Top_Level : Root_Policy);
 
    --  Return exactly one event, Need_Input, completion, or failure.  Consumed
    --  is always a count from Input'First and never an Ada array index.  Item is
@@ -185,7 +198,25 @@ private package Flyology_JSON.Parser_Core is
       Events       : out Buffered_Event_Array;
       Result       : out Buffered_Drain_Result);
 
+   generic
+      type Output_Event is private;
+      type Output_Event_Array is
+        array (Ada.Streams.Stream_Element_Offset range <>) of Output_Event;
+      with function Convert (Item : Buffered_Event) return Output_Event;
+   procedure Generic_Drain
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Events       : out Output_Event_Array;
+      Result       : out Buffered_Drain_Result);
+
+   --  Generic_Drain invokes Convert exactly once for each published event and
+   --  writes directly into Events through the same Run engine as Next and
+   --  Buffered_Drain.  A null Events array is a nonmutating capacity stop.
+
    function Buffered_Kind (Item : Buffered_Event) return Event_Kind;
+
+   function Empty_Buffered return Buffered_Event;
 
    function Buffered_Source (Item : Buffered_Event) return Source_Range;
 
@@ -196,7 +227,7 @@ private package Flyology_JSON.Parser_Core is
    --  Resolve a raw range only against the exact unchanged Input actual from
    --  the Buffered_Drain call that returned Item.  Input_First is that call's
    --  Buffered_Drain_Result.Input_First and Input_Length is Input'Length.  A
-   --  A noncontaining coordinate window returns zero counts without raising;
+   --  noncontaining coordinate window returns zero counts without raising;
    --  coordinate containment cannot establish array identity or staleness.
    procedure Resolve_Buffered_Raw_Range
      (Item         : Buffered_Event;
@@ -231,6 +262,10 @@ private package Flyology_JSON.Parser_Core is
    --  Failed, or Aborted.  In another state it is a nonraising no-op.
    procedure Reset (Self : in out Parser);
 
+   --  Reset a terminal parser and freeze a new top-level policy.  In another
+   --  state it is a nonraising no-op.
+   procedure Reset (Self : in out Parser; Top_Level : Root_Policy);
+
    function State (Self : Parser) return Parser_State;
 
    function Terminal_Diagnostic (Self : Parser) return Diagnostic
@@ -263,12 +298,10 @@ private
       Object_Value,
       Object_Comma_Or_End);
 
-   type Container_Frame is record
-      Phase             : Container_Phase;
-      Duplicate_Context : Parser_Duplicates.Object_Context;
-   end record;
+   type Phase_Array is array (Positive range <>) of Container_Phase;
 
-   type Frame_Array is array (Positive range <>) of Container_Frame;
+   type Duplicate_Context_Array is
+     array (Positive range <>) of Parser_Duplicates.Object_Context;
 
    type Token_Kind is (No_Token, Number_Token, Null_Token, True_Token, False_Token, Name_Token, String_Token);
 
@@ -278,14 +311,16 @@ private
    type Parser
      (Maximum_Depth       : Natural;
       Name_Octet_Capacity : Natural;
-      Name_Capacity       : Natural)
+      Name_Capacity       : Natural;
+      Duplicate_Handling  : Duplicate_Mode)
    is limited record
       Current_State       : Parser_State := Uninitialized;
       Last_Diagnostic     : Diagnostic := (Code => No_Error, Offset => 0);
       Next_Offset         : Byte_Offset := 0;
       Depth               : Natural := 0;
-      Stack               : Frame_Array (1 .. Maximum_Depth);
-      Duplicate_Names     : Parser_Duplicates.Index (Name_Octet_Capacity, Name_Capacity);
+      Stack               : Phase_Array (1 .. Maximum_Depth);
+      Applied_Root_Policy : Root_Policy := Accept_Any;
+      Final_Input_Seen    : Boolean := False;
       Root_Started        : Boolean := False;
       Root_Complete       : Boolean := False;
       Document_End_Sent   : Boolean := False;
@@ -303,6 +338,14 @@ private
       Literal_Position    : Natural := 0;
       Literal_Can_Slice   : Boolean := False;
       Literal_First_Count : Ada.Streams.Stream_Element_Count := 0;
+      case Duplicate_Handling is
+         when Reject_Duplicates  =>
+            Duplicate_Names    : Parser_Duplicates.Index (Name_Octet_Capacity, Name_Capacity);
+            Duplicate_Contexts : Duplicate_Context_Array (1 .. Maximum_Depth);
+
+         when Preserve_Unchecked =>
+            null;
+      end case;
    end record;
 
 end Flyology_JSON.Parser_Core;

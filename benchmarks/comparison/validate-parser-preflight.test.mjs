@@ -35,7 +35,7 @@ function validLines() {
 test("accepts the exact parser preflight matrix", () => {
   const result = run(validLines());
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /validated 40 exact parser preflight populations/);
+  assert.match(result.stdout, /validated 45 exact parser preflight populations/);
 });
 
 test("rejects a missing parser preflight population", () => {

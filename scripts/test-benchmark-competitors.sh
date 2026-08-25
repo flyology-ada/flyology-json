@@ -68,8 +68,73 @@ FLYOLOGY_JSON_BENCH_TUNING="$track" \
 FLYOLOGY_JSON_BENCH_NATIVE_SWITCH="$native_switch" \
   alr build --release
 FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
+FLYOLOGY_JSON_BENCH_FIXTURE= \
+FLYOLOGY_JSON_BENCH_CHUNK= \
+FLYOLOGY_JSON_BENCH_DUPLICATES= \
   bin/flyology_json-parser_benchmark >"$parser_preflight_output"
 node "$project_root/scripts/validate-parser-preflight.mjs" "$parser_preflight_output"
+FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
+FLYOLOGY_JSON_BENCH_FIXTURE=large_array \
+FLYOLOGY_JSON_BENCH_CHUNK=monolith \
+FLYOLOGY_JSON_BENCH_DUPLICATES=reject \
+  bin/flyology_json-parser_benchmark >"$selection_output"
+test "$(wc -l <"$selection_output" | tr -d ' ')" -eq 1
+grep -Fq \
+  'parser_validation/api=public_drain/large_array/duplicates=reject/chunk=monolith/' \
+  "$selection_output"
+FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
+FLYOLOGY_JSON_BENCH_FIXTURE=large_object \
+FLYOLOGY_JSON_BENCH_CHUNK=monolith \
+FLYOLOGY_JSON_BENCH_DUPLICATES=preserve \
+  bin/flyology_json-parser_benchmark >"$selection_output"
+test "$(wc -l <"$selection_output" | tr -d ' ')" -eq 1
+grep -Fq \
+  'parser_validation/api=public_drain/large_object/duplicates=preserve/chunk=monolith/' \
+  "$selection_output"
+if FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
+  FLYOLOGY_JSON_BENCH_FIXTURE=large_array \
+  FLYOLOGY_JSON_BENCH_CHUNK= \
+  FLYOLOGY_JSON_BENCH_DUPLICATES=preserve \
+  bin/flyology_json-parser_benchmark >"$selection_output" 2>"$selection_error"; then
+  echo "incompatible parser benchmark selectors were accepted" >&2
+  exit 1
+fi
+grep -Fqx \
+  'raised CONSTRAINT_ERROR : the maintained preserve lane is available only for large_object' \
+  "$selection_error"
+if FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
+  FLYOLOGY_JSON_BENCH_FIXTURE=not-a-fixture \
+  FLYOLOGY_JSON_BENCH_CHUNK= \
+  FLYOLOGY_JSON_BENCH_DUPLICATES= \
+  bin/flyology_json-parser_benchmark >"$selection_output" 2>"$selection_error"; then
+  echo "unknown parser fixture selector was accepted" >&2
+  exit 1
+fi
+grep -Fqx \
+  'raised CONSTRAINT_ERROR : unknown FLYOLOGY_JSON_BENCH_FIXTURE selector' \
+  "$selection_error"
+if FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
+  FLYOLOGY_JSON_BENCH_FIXTURE= \
+  FLYOLOGY_JSON_BENCH_CHUNK=2 \
+  FLYOLOGY_JSON_BENCH_DUPLICATES= \
+  bin/flyology_json-parser_benchmark >"$selection_output" 2>"$selection_error"; then
+  echo "unknown parser chunk selector was accepted" >&2
+  exit 1
+fi
+grep -Fqx \
+  'raised CONSTRAINT_ERROR : unknown FLYOLOGY_JSON_BENCH_CHUNK selector' \
+  "$selection_error"
+if FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
+  FLYOLOGY_JSON_BENCH_FIXTURE= \
+  FLYOLOGY_JSON_BENCH_CHUNK= \
+  FLYOLOGY_JSON_BENCH_DUPLICATES=invalid \
+  bin/flyology_json-parser_benchmark >"$selection_output" 2>"$selection_error"; then
+  echo "unknown parser duplicate selector was accepted" >&2
+  exit 1
+fi
+grep -Fqx \
+  'raised CONSTRAINT_ERROR : FLYOLOGY_JSON_BENCH_DUPLICATES must be reject or preserve' \
+  "$selection_error"
 FLYOLOGY_JSON_BENCH_TUNING="$track" \
 FLYOLOGY_JSON_BENCH_NATIVE_SWITCH="$native_switch" \
 FLYOLOGY_JSON_BENCH_SYSTEM_LIBRARIES="$system_libraries" \

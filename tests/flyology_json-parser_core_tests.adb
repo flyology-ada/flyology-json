@@ -27,6 +27,19 @@ procedure Flyology_JSON.Parser_Core_Tests is
 
    type Event_Counts is array (Core.Event_Kind) of Natural;
 
+   type Direct_Event is record
+      Kind   : Core.Event_Kind;
+      Source : Core.Source_Range;
+   end record;
+
+   type Direct_Event_Array is array (Offset range <>) of Direct_Event;
+
+   function Convert_Direct (Item : Core.Buffered_Event) return Direct_Event
+   is (Kind => Core.Buffered_Kind (Item), Source => Core.Buffered_Source (Item));
+
+   procedure Direct_Drain is new Core.Generic_Drain
+     (Output_Event => Direct_Event, Output_Event_Array => Direct_Event_Array, Convert => Convert_Direct);
+
    --  Fixture/campaign storage only; this is not a parser capacity or API default.
    Test_Text_Capacity       : constant := 8_192;
    Test_Fragment_Capacity   : constant := 64;
@@ -483,11 +496,20 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end loop;
    end Drain_Batched;
 
-   function Parse (Text : String; Split : Natural; Maximum_Depth : Natural := 8) return Observation is
-      Parser : Core.Parser (Maximum_Depth, Test_Name_Octet_Capacity, Test_Name_Capacity);
+   function Parse
+     (Text                : String;
+      Split               : Natural;
+      Maximum_Depth       : Natural := 8;
+      Name_Octet_Capacity : Natural := Test_Name_Octet_Capacity;
+      Name_Capacity       : Natural := Test_Name_Capacity;
+      Duplicate_Handling  : Core.Duplicate_Mode := Core.Reject_Duplicates;
+      Top_Level           : Core.Root_Policy := Core.Accept_Any) return Observation
+   is
+      Parser : Core.Parser
+        (Maximum_Depth, Name_Octet_Capacity, Name_Capacity, Duplicate_Handling);
       Seen   : Observation;
    begin
-      Core.Initialize (Parser);
+      Core.Initialize (Parser, Top_Level);
 
       if Split > 0 then
          declare
@@ -516,12 +538,15 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Split         : Natural;
       Capacity      : Positive;
       Buffer_First  : Offset;
-      Maximum_Depth : Natural := 8) return Observation
+      Maximum_Depth : Natural := 8;
+      Duplicate_Handling : Core.Duplicate_Mode := Core.Reject_Duplicates;
+      Top_Level : Core.Root_Policy := Core.Accept_Any) return Observation
    is
-      Parser : Core.Parser (Maximum_Depth, Test_Name_Octet_Capacity, Test_Name_Capacity);
+      Parser : Core.Parser
+        (Maximum_Depth, Test_Name_Octet_Capacity, Test_Name_Capacity, Duplicate_Handling);
       Seen   : Observation;
    begin
-      Core.Initialize (Parser);
+      Core.Initialize (Parser, Top_Level);
 
       if Split > 0 then
          declare
@@ -545,11 +570,17 @@ procedure Flyology_JSON.Parser_Core_Tests is
       return Seen;
    end Parse_Batched;
 
-   function Parse_One_Byte (Text : String) return Observation is
-      Parser : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity);
+   function Parse_One_Byte
+     (Text                : String;
+      Name_Octet_Capacity : Natural := Test_Name_Octet_Capacity;
+      Name_Capacity       : Natural := Test_Name_Capacity;
+      Duplicate_Handling  : Core.Duplicate_Mode := Core.Reject_Duplicates;
+      Top_Level           : Core.Root_Policy := Core.Accept_Any) return Observation
+   is
+      Parser : Core.Parser (8, Name_Octet_Capacity, Name_Capacity, Duplicate_Handling);
       Seen   : Observation;
    begin
-      Core.Initialize (Parser);
+      Core.Initialize (Parser, Top_Level);
 
       if Text'Length = 0 then
          declare
@@ -588,15 +619,17 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Seed                : Interfaces.Unsigned_32;
       Maximum_Depth       : Natural := 8;
       Name_Octet_Capacity : Natural := Test_Name_Octet_Capacity;
-      Name_Capacity       : Natural := Test_Name_Capacity) return Observation
+      Name_Capacity       : Natural := Test_Name_Capacity;
+      Duplicate_Handling  : Core.Duplicate_Mode := Core.Reject_Duplicates;
+      Top_Level           : Core.Root_Policy := Core.Accept_Any) return Observation
    is
       --  Campaign data only.  These LCG coefficients do not affect parser behavior.
       Generator : Interfaces.Unsigned_32 := Seed;
-      Parser    : Core.Parser (Maximum_Depth, Name_Octet_Capacity, Name_Capacity);
+      Parser    : Core.Parser (Maximum_Depth, Name_Octet_Capacity, Name_Capacity, Duplicate_Handling);
       Seen      : Observation;
       Position  : Natural := 0;
    begin
-      Core.Initialize (Parser);
+      Core.Initialize (Parser, Top_Level);
 
       while Position < Text'Length loop
          Generator := Generator * 1_664_525 + 1_013_904_223;
@@ -643,7 +676,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       --  Match Parse_Randomized's input schedule while independently varying
       --  the event buffer's capacity and lower bound.
       Generator : Interfaces.Unsigned_32 := Seed;
-      Parser    : Core.Parser (Maximum_Depth, Name_Octet_Capacity, Name_Capacity);
+      Parser    : Core.Parser (Maximum_Depth, Name_Octet_Capacity, Name_Capacity, Core.Reject_Duplicates);
       Seen      : Observation;
       Position  : Natural := 0;
    begin
@@ -693,7 +726,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
    function Parse_Partition
      (Text : String; Boundaries : Interfaces.Unsigned_32; Allow_Failure : Boolean := False) return Observation
    is
-      Parser      : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity);
+      Parser      : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity, Core.Reject_Duplicates);
       Seen        : Observation;
       Chunk_First : Natural := 0;
    begin
@@ -959,7 +992,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
    end Check_Truncated_Raw_Prefix;
 
    procedure Check_Literal_Transport is
-      Parser : Core.Parser (1, 0, 0);
+      Parser : Core.Parser (1, 0, 0, Core.Reject_Duplicates);
       Result : Core.Next_Result;
       Empty  : Ada.Streams.Stream_Element_Array (1 .. 0);
    begin
@@ -1104,7 +1137,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Input : constant Ada.Streams.Stream_Element_Array := To_Input ("x", 17);
    begin
       declare
-         Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity);
+         Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity, Core.Reject_Duplicates);
       begin
          Core.Abort_Document (Parser);
          Check (Core.State (Parser) = Core.Uninitialized, "uninitialized abort was not a no-op");
@@ -1118,7 +1151,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity);
+         Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity, Core.Reject_Duplicates);
          Result : Core.Next_Result;
       begin
          Core.Initialize (Parser);
@@ -1129,7 +1162,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser  : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity);
+         Parser  : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity, Core.Reject_Duplicates);
          Seen    : Observation;
          Result  : Core.Next_Result;
          Primary : Core.Diagnostic;
@@ -1144,7 +1177,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          Check (Result.Diagnostic.Code = Core.Invalid_State, "rejected failed call diagnostic is wrong");
          Check (Core.Terminal_Diagnostic (Parser) = Primary, "rejected call replaced primary failure");
          Core.Abort_Document (Parser);
-         Check (Core.State (Parser) = Core.Aborted, "failed abort did not enter Aborted");
+         Check (Core.State (Parser) = Core.Failed, "failed abort changed terminal state");
          Check (Core.Terminal_Diagnostic (Parser) = Primary, "abort replaced primary failure");
          Core.Reset (Parser);
          Seen := (others => <>);
@@ -1153,7 +1186,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity);
+         Parser : Core.Parser (1, Test_Name_Octet_Capacity, Test_Name_Capacity, Core.Reject_Duplicates);
          Seen   : Observation;
          Result : Core.Next_Result;
       begin
@@ -1165,7 +1198,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          Check (Result.Consumed = 0, "rejected completed call consumed input");
          Check (Result.Diagnostic.Code = Core.Invalid_State, "completed rejection diagnostic is wrong");
          Core.Abort_Document (Parser);
-         Check (Core.State (Parser) = Core.Aborted, "completed abort did not revoke completion");
+         Check (Core.State (Parser) = Core.Completed, "completed abort revoked completion");
          Core.Reset (Parser);
          Seen := (others => <>);
          Drain (Parser, To_Input (Quote & "reuse" & Quote, -13), 0, True, Seen);
@@ -1217,7 +1250,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       begin
          for Split in 0 .. Text'Length loop
             declare
-               Parser : Core.Parser (4, Name_Octets, Names);
+               Parser : Core.Parser (4, Name_Octets, Names, Core.Reject_Duplicates);
                Seen   : Observation;
             begin
                Core.Initialize (Parser);
@@ -1237,7 +1270,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          end loop;
 
          declare
-            Parser : Core.Parser (4, Name_Octets, Names);
+            Parser : Core.Parser (4, Name_Octets, Names, Core.Reject_Duplicates);
             Seen   : Observation;
          begin
             Core.Initialize (Parser);
@@ -1255,7 +1288,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
 
          for Seed in Interfaces.Unsigned_32 range 1 .. 4 loop
             declare
-               Parser    : Core.Parser (4, Name_Octets, Names);
+               Parser    : Core.Parser (4, Name_Octets, Names, Core.Reject_Duplicates);
                Seen      : Observation;
                Generator : Interfaces.Unsigned_32 := Seed;
                Position  : Natural := 0;
@@ -1342,7 +1375,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          end Reach_Pending;
       begin
          declare
-            Parser : Core.Parser (4, 1, 1);
+            Parser : Core.Parser (4, 1, 1, Core.Reject_Duplicates);
             Used   : Count := 0;
             Result : Core.Next_Result;
          begin
@@ -1354,7 +1387,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          end;
 
          declare
-            Parser : Core.Parser (4, 1, 1);
+            Parser : Core.Parser (4, 1, 1, Core.Reject_Duplicates);
             Used   : Count := 0;
             Result : Core.Next_Result;
          begin
@@ -1364,7 +1397,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          end;
 
          declare
-            Parser  : Core.Parser (4, 1, 1);
+            Parser  : Core.Parser (4, 1, 1, Core.Reject_Duplicates);
             Used    : Count := 0;
             Result  : Core.Next_Result;
             Primary : Core.Diagnostic;
@@ -1377,7 +1410,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          end;
 
          declare
-            Parser : Core.Parser (4, 1, 1);
+            Parser : Core.Parser (4, 1, 1, Core.Reject_Duplicates);
             Used   : Count := 0;
             Result : Core.Next_Result;
             Seen   : Observation;
@@ -1393,7 +1426,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       procedure Check_Short_Escape_Denial_Event is
          Text   : constant String := "{" & Quote & Reverse_Solidus & Quote & Quote & ":0}";
          Input  : constant Ada.Streams.Stream_Element_Array := To_Input (Text, -57);
-         Parser : Core.Parser (4, 0, 1);
+         Parser : Core.Parser (4, 0, 1, Core.Reject_Duplicates);
          Used   : Count := 0;
          Result : Core.Next_Result;
 
@@ -1601,7 +1634,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          1);
 
       declare
-         Parser : Core.Parser (4, 16, 4);
+         Parser : Core.Parser (4, 16, 4, Core.Reject_Duplicates);
          Seen   : Observation;
       begin
          Core.Initialize (Parser);
@@ -1619,7 +1652,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser : Core.Parser (4, 0, 1);
+         Parser : Core.Parser (4, 0, 1, Core.Reject_Duplicates);
          Seen   : Observation;
       begin
          Core.Initialize (Parser);
@@ -1642,16 +1675,26 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Capacities : constant Capacity_Array := [1, 2, 3, 4, 7, 16, 64];
       Bounds     : constant Bound_Array := [-31, 0, 29];
 
-      procedure Check_Text (Text : String) is
+      procedure Check_Text
+        (Text               : String;
+         Duplicate_Handling : Core.Duplicate_Mode := Core.Reject_Duplicates)
+      is
       begin
          for Split in 0 .. Text'Length loop
             declare
-               Expected : constant Observation := Parse (Text, Split);
+               Expected : constant Observation :=
+                 Parse (Text, Split, Duplicate_Handling => Duplicate_Handling);
             begin
                for Capacity of Capacities loop
                   for Buffer_First of Bounds loop
                      declare
-                        Actual : constant Observation := Parse_Batched (Text, Split, Capacity, Buffer_First);
+                        Actual : constant Observation :=
+                          Parse_Batched
+                            (Text,
+                             Split,
+                             Capacity,
+                             Buffer_First,
+                             Duplicate_Handling => Duplicate_Handling);
                      begin
                         Check
                           (Actual = Expected,
@@ -1709,8 +1752,8 @@ procedure Flyology_JSON.Parser_Core_Tests is
 
       procedure Check_Capacity_One (Text : String) is
          Input       : constant Ada.Streams.Stream_Element_Array := To_Input (Text, -43);
-         Next_Parser : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity);
-         Many_Parser : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity);
+         Next_Parser : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity, Core.Reject_Duplicates);
+         Many_Parser : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity, Core.Reject_Duplicates);
          Events      : Core.Event_Array (-17 .. -17);
          Next_Item   : Core.Next_Result;
          Many_Item   : Core.Drain_Result;
@@ -1789,6 +1832,9 @@ procedure Flyology_JSON.Parser_Core_Tests is
          & "uDE00"
          & Quote);
       Check_Text ("{" & Quote & "a" & Quote & ":[0," & Quote & Reverse_Solidus & "u20AC" & Quote & "]}");
+      Check_Text
+        ("{" & Quote & "a" & Quote & ":0," & Quote & Reverse_Solidus & "u0061" & Quote & ":1}",
+         Duplicate_Handling => Core.Preserve_Unchecked);
       Check_Text ("truex");
       Check_Text ("[0,]");
       Check_Text (Quote & "a" & Reverse_Solidus & "x" & Quote);
@@ -1834,7 +1880,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Empty : Ada.Streams.Stream_Element_Array (7 .. 6);
    begin
       declare
-         Parser : Core.Parser (2, 8, 4);
+         Parser : Core.Parser (2, 8, 4, Core.Reject_Duplicates);
          Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("[]", -9);
          Events : Core.Event_Array (13 .. 12);
          Result : Core.Drain_Result;
@@ -1856,7 +1902,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser : Core.Parser (2, 8, 4);
+         Parser : Core.Parser (2, 8, 4, Core.Reject_Duplicates);
          Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("[]", -9);
          Events : Core.Event_Array (-11 .. -10);
          Result : Core.Drain_Result;
@@ -1886,7 +1932,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser : Core.Parser (2, 8, 4);
+         Parser : Core.Parser (2, 8, 4, Core.Reject_Duplicates);
          Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("[]", 37);
          Events : Core.Event_Array (23 .. 30);
          Result : Core.Drain_Result;
@@ -1910,7 +1956,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser : Core.Parser (2, 8, 4);
+         Parser : Core.Parser (2, 8, 4, Core.Reject_Duplicates);
          Prefix : constant Ada.Streams.Stream_Element_Array := To_Input ("[", -3);
          Suffix : constant Ada.Streams.Stream_Element_Array := To_Input ("]", 17);
          Events : Core.Event_Array (-5 .. 2);
@@ -1929,7 +1975,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
 
       declare
-         Parser : Core.Parser (2, 8, 4);
+         Parser : Core.Parser (2, 8, 4, Core.Reject_Duplicates);
          Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("[x", 5);
          Events : Core.Event_Array (0 .. 7);
          Result : Core.Drain_Result;
@@ -1951,7 +1997,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          Input : constant Ada.Streams.Stream_Element_Array := To_Input (Text, -33);
       begin
          declare
-            Parser : Core.Parser (4, 1, 1);
+            Parser : Core.Parser (4, 1, 1, Core.Reject_Duplicates);
             Events : Core.Event_Array (9 .. 13);
             Result : Core.Drain_Result;
          begin
@@ -1977,7 +2023,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          end;
 
          declare
-            Parser : Core.Parser (4, 1, 1);
+            Parser : Core.Parser (4, 1, 1, Core.Reject_Duplicates);
             Events : Core.Event_Array (-19 .. -12);
             Result : Core.Drain_Result;
          begin
@@ -2010,10 +2056,13 @@ procedure Flyology_JSON.Parser_Core_Tests is
          Seed                : Interfaces.Unsigned_32 := 0;
          Maximum_Depth       : Natural := 8;
          Name_Octet_Capacity : Natural := Test_Name_Octet_Capacity;
-         Name_Capacity       : Natural := Test_Name_Capacity)
+         Name_Capacity       : Natural := Test_Name_Capacity;
+         Duplicate_Handling  : Core.Duplicate_Mode := Core.Reject_Duplicates)
       is
-         Plain_Parser    : Core.Parser (Maximum_Depth, Name_Octet_Capacity, Name_Capacity);
-         Buffered_Parser : Core.Parser (Maximum_Depth, Name_Octet_Capacity, Name_Capacity);
+         Plain_Parser    : Core.Parser
+           (Maximum_Depth, Name_Octet_Capacity, Name_Capacity, Duplicate_Handling);
+         Buffered_Parser : Core.Parser
+           (Maximum_Depth, Name_Octet_Capacity, Name_Capacity, Duplicate_Handling);
          Plain_Events    : Core.Event_Array (Buffer_First .. Buffer_First + Offset (Capacity) - 1);
          Buffered_Events :
            Core.Buffered_Event_Array (-Buffer_First .. -Buffer_First + Offset (Capacity) - 1);
@@ -2145,7 +2194,8 @@ procedure Flyology_JSON.Parser_Core_Tests is
         (Text                : String;
          Maximum_Depth       : Natural := 8;
          Name_Octet_Capacity : Natural := Test_Name_Octet_Capacity;
-         Name_Capacity       : Natural := Test_Name_Capacity)
+         Name_Capacity       : Natural := Test_Name_Capacity;
+         Duplicate_Handling  : Core.Duplicate_Mode := Core.Reject_Duplicates)
       is
       begin
          for Capacity of Capacities loop
@@ -2158,7 +2208,8 @@ procedure Flyology_JSON.Parser_Core_Tests is
                      Split,
                      Maximum_Depth       => Maximum_Depth,
                      Name_Octet_Capacity => Name_Octet_Capacity,
-                     Name_Capacity       => Name_Capacity);
+                     Name_Capacity       => Name_Capacity,
+                     Duplicate_Handling  => Duplicate_Handling);
                end loop;
 
                for Seed in Interfaces.Unsigned_32 range 1 .. 8 loop
@@ -2170,7 +2221,8 @@ procedure Flyology_JSON.Parser_Core_Tests is
                      Seed                => Seed,
                      Maximum_Depth       => Maximum_Depth,
                      Name_Octet_Capacity => Name_Octet_Capacity,
-                     Name_Capacity       => Name_Capacity);
+                     Name_Capacity       => Name_Capacity,
+                     Duplicate_Handling  => Duplicate_Handling);
                end loop;
             end loop;
          end loop;
@@ -2211,6 +2263,11 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Check_Text
         ("{" & Quote & "a" & Quote & ":0," & Quote & Reverse_Solidus & "u0061" & Quote & ":1}");
       Check_Text
+        ("{" & Quote & "a" & Quote & ":0," & Quote & Reverse_Solidus & "u0061" & Quote & ":1}",
+         Name_Octet_Capacity => 0,
+         Name_Capacity       => 0,
+         Duplicate_Handling  => Core.Preserve_Unchecked);
+      Check_Text
         ("{" & Quote & "ab" & Quote & ":0}", Name_Octet_Capacity => 1, Name_Capacity => 1);
       Check_Text (Quote & "a" & Reverse_Solidus & "x" & Quote);
       Check_Text (Quote & Character'Val (16#E2#) & Character'Val (16#82#));
@@ -2218,8 +2275,8 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Check_Text (Quote & Reverse_Solidus & "uD800" & Quote);
 
       declare
-         Plain_Parser    : Core.Parser (2, 8, 4);
-         Buffered_Parser : Core.Parser (2, 8, 4);
+         Plain_Parser    : Core.Parser (2, 8, 4, Core.Reject_Duplicates);
+         Buffered_Parser : Core.Parser (2, 8, 4, Core.Reject_Duplicates);
          Input           : constant Ada.Streams.Stream_Element_Array := To_Input ("[]", -11);
          Plain_Events    : Core.Event_Array (9 .. 8);
          Buffered_Events : Core.Buffered_Event_Array (-7 .. -8);
@@ -2237,7 +2294,295 @@ procedure Flyology_JSON.Parser_Core_Tests is
       end;
    end Check_Buffered_Drain_Parity;
 
+   procedure Check_Preserve_Mode is
+      Document : constant String :=
+        "{" & Quote & "a" & Quote & ":0," & Quote & Reverse_Solidus & "u0061" & Quote & ":1}";
+
+      procedure Check_Complete (Seen : Observation; Schedule : String) is
+      begin
+         Check (Seen.Outcome = Core.Document_Complete, Schedule & " rejected preserved duplicates");
+         Check (Seen.Events (Core.Name_Begin) = 2, Schedule & " hid a preserved name begin");
+         Check (Seen.Events (Core.Name_End) = 2, Schedule & " hid a preserved name end");
+         Check (Seen.Name_Text (1 .. Seen.Name_Length) = "aa", Schedule & " changed decoded names");
+      end Check_Complete;
+   begin
+      declare
+         Preserve_Zero : Core.Parser (8, 0, 0, Core.Preserve_Unchecked);
+         Preserve_Wide : Core.Parser (8, 8_192, 256, Core.Preserve_Unchecked);
+         Strict_Wide   : Core.Parser (8, 8_192, 256, Core.Reject_Duplicates);
+      begin
+         Check
+           (Preserve_Zero'Size = Preserve_Wide'Size,
+            "preserve parser retained duplicate-arena capacity");
+         Check (Preserve_Wide'Size < Strict_Wide'Size, "preserve parser retained duplicate storage");
+      end;
+
+      for Split in 0 .. Document'Length loop
+         Check_Complete
+           (Parse
+              (Document,
+               Split,
+               Name_Octet_Capacity => 0,
+               Name_Capacity       => 0,
+               Duplicate_Handling  => Core.Preserve_Unchecked),
+            "preserve split" & Natural'Image (Split));
+      end loop;
+
+      Check_Complete
+        (Parse_One_Byte
+           (Document,
+            Name_Octet_Capacity => 0,
+            Name_Capacity       => 0,
+            Duplicate_Handling  => Core.Preserve_Unchecked),
+         "preserve one-byte schedule");
+
+      for Seed in Interfaces.Unsigned_32 range 1 .. 16 loop
+         Check_Complete
+           (Parse_Randomized
+              (Document,
+               Seed,
+               Name_Octet_Capacity => 0,
+               Name_Capacity       => 0,
+               Duplicate_Handling  => Core.Preserve_Unchecked),
+            "preserve random schedule" & Seed'Image);
+      end loop;
+
+      declare
+         Seen : constant Observation :=
+           Parse
+             ("{" & Quote & Reverse_Solidus & "q" & Quote & ":0}",
+              3,
+              Name_Octet_Capacity => 0,
+              Name_Capacity       => 0,
+              Duplicate_Handling  => Core.Preserve_Unchecked);
+      begin
+         Check (Seen.Outcome = Core.Parse_Failed, "preserve mode accepted malformed escape");
+         Check (Seen.Diagnostic.Code = Core.Invalid_Escape, "preserve mode changed malformed status");
+      end;
+   end Check_Preserve_Mode;
+
+   procedure Check_Root_Policy is
+      procedure Check_Rejected_Root (Text : String) is
+         procedure Check_Seen (Seen : Observation; Schedule : String) is
+         begin
+            Check (Seen.Outcome = Core.Parse_Failed, Schedule & " accepted a non-object root");
+            Check
+              (Seen.Diagnostic.Code = Core.Top_Level_Kind_Rejected,
+               Schedule & " changed the non-object root status");
+            Check (Seen.Diagnostic.Offset = 0, Schedule & " moved the non-object blame offset");
+         end Check_Seen;
+      begin
+         for Split in 0 .. Text'Length loop
+            Check_Seen
+              (Parse (Text, Split, Top_Level => Core.Require_Object),
+               "object-only split" & Natural'Image (Split));
+         end loop;
+         Check_Seen
+           (Parse_One_Byte (Text, Top_Level => Core.Require_Object),
+            "object-only one-byte schedule");
+         for Seed in Interfaces.Unsigned_32 range 1 .. 16 loop
+            Check_Seen
+              (Parse_Randomized (Text, Seed, Top_Level => Core.Require_Object),
+               "object-only random schedule" & Seed'Image);
+         end loop;
+      end Check_Rejected_Root;
+
+      procedure Check_Malformed_Root (Text : String) is
+         procedure Check_Seen (Seen : Observation; Schedule : String) is
+         begin
+            Check (Seen.Outcome = Core.Parse_Failed, Schedule & " accepted malformed JSON");
+            Check
+              (Seen.Diagnostic.Code = Core.Unexpected_Token,
+               Schedule & " hid malformed syntax behind root policy");
+            Check (Seen.Diagnostic.Offset = 0, Schedule & " moved malformed-root blame");
+         end Check_Seen;
+      begin
+         for Split in 0 .. Text'Length loop
+            Check_Seen
+              (Parse (Text, Split, Top_Level => Core.Require_Object),
+               "malformed-root split" & Natural'Image (Split));
+         end loop;
+         Check_Seen
+           (Parse_One_Byte (Text, Top_Level => Core.Require_Object),
+            "malformed-root one-byte schedule");
+         for Seed in Interfaces.Unsigned_32 range 1 .. 16 loop
+            Check_Seen
+              (Parse_Randomized (Text, Seed, Top_Level => Core.Require_Object),
+               "malformed-root random schedule" & Seed'Image);
+         end loop;
+      end Check_Malformed_Root;
+   begin
+      Check_Rejected_Root ("null");
+      Check_Rejected_Root ("[]");
+      Check_Rejected_Root (Quote & "x" & Quote);
+      Check_Rejected_Root ("0");
+      Check_Rejected_Root ("nx");
+      Check_Rejected_Root ("tx");
+      Check_Rejected_Root ("fx");
+      Check_Rejected_Root ("-x");
+      Check_Rejected_Root ("01");
+      Check_Rejected_Root ("[");
+      Check_Rejected_Root (Quote & "unterminated");
+      Check_Malformed_Root ("x");
+      Check_Malformed_Root ("+1");
+      Check_Malformed_Root ("]");
+
+      declare
+         Document : constant String := "  {" & Quote & "a" & Quote & ":0}";
+      begin
+         for Split in 0 .. Document'Length loop
+            Check
+              (Parse (Document, Split, Top_Level => Core.Require_Object).Outcome = Core.Document_Complete,
+               "object-only root rejected an object split" & Natural'Image (Split));
+         end loop;
+
+         for Seed in Interfaces.Unsigned_32 range 1 .. 16 loop
+            Check
+              (Parse_Randomized
+                 (Document, Seed, Top_Level => Core.Require_Object).Outcome = Core.Document_Complete,
+               "object-only root rejected a randomized object schedule");
+         end loop;
+      end;
+
+      declare
+         Parser : Core.Parser (2, 0, 0, Core.Preserve_Unchecked);
+         Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("  []", -37);
+         Result : Core.Next_Result;
+      begin
+         Core.Initialize (Parser, Core.Require_Object);
+         Core.Next (Parser, Input, True, Result);
+         Check (Result.Outcome = Core.Event_Ready, "object-only setup omitted document begin");
+         Core.Next (Parser, Input, True, Result);
+         Check (Result.Outcome = Core.Parse_Failed, "object-only direct check accepted an array");
+         Check (Result.Consumed = 2, "object-only direct check consumed the root opener");
+         Check (Result.Diagnostic.Offset = 2, "object-only direct check moved past whitespace");
+      end;
+   end Check_Root_Policy;
+
+   procedure Check_Final_Input_Latch is
+      Parser : Core.Parser (1, 0, 0, Core.Preserve_Unchecked);
+      Empty  : Ada.Streams.Stream_Element_Array (17 .. 16);
+      Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("[]", -41);
+      Result : Core.Next_Result;
+   begin
+      Core.Initialize (Parser);
+      Core.Next (Parser, Empty, True, Result);
+      Check (Result.Outcome = Core.Event_Ready, "final-input setup omitted document begin");
+      Check (Result.Input_First = 0, "step input origin changed");
+
+      Core.Next (Parser, Input, False, Result);
+      Check (Result.Outcome = Core.Call_Rejected, "final-input retraction was accepted");
+      Check (Result.Consumed = 0, "final-input retraction consumed input");
+      Check (Result.Diagnostic.Code = Core.Final_Input_Retracted, "final-input status changed");
+      Check (Core.State (Parser) = Core.Active, "final-input retraction changed parser state");
+
+      Core.Next (Parser, Input, True, Result);
+      Check (Result.Outcome = Core.Event_Ready, "latched final input could not continue");
+      Check (Result.Item.Kind = Core.Array_Begin, "latched final input changed the next event");
+
+      declare
+         Drain_Parser : Core.Parser (1, 0, 0, Core.Preserve_Unchecked);
+         Events       : Core.Event_Array (-9 .. -9);
+         Drain_Result : Core.Drain_Result;
+      begin
+         Core.Initialize (Drain_Parser);
+         Core.Drain (Drain_Parser, Input, True, Events, Drain_Result);
+         Check (Drain_Result.Stop = Core.Drain_Buffer_Full, "final drain did not fill output");
+         Check
+           (Drain_Result.Consumed = 0 and then Drain_Result.Produced = 1,
+            "final output-full drain changed effects");
+
+         Core.Drain (Drain_Parser, Input, False, Events, Drain_Result);
+         Check
+           (Drain_Result.Stop = Core.Drain_Call_Rejected,
+            "output-full drain did not retain final-input latch");
+         Check
+           (Drain_Result.Consumed = 0 and then Drain_Result.Produced = 0,
+            "drain final-input retraction had effects");
+         Check
+           (Drain_Result.Diagnostic.Code = Core.Final_Input_Retracted,
+            "drain final-input retraction changed status");
+
+         Core.Drain (Drain_Parser, Input, True, Events, Drain_Result);
+         Check (Drain_Result.Stop = Core.Drain_Buffer_Full, "latched final drain could not continue");
+         Check (Events (-9).Kind = Core.Array_Begin, "latched final drain changed next event");
+      end;
+   end Check_Final_Input_Latch;
+
+   procedure Check_Generic_Publisher is
+      Parser : Core.Parser (1, 0, 0, Core.Preserve_Unchecked);
+      Input  : constant Ada.Streams.Stream_Element_Array := To_Input ("{}", -23);
+      Events : Direct_Event_Array (-19 .. 12);
+      Result : Core.Buffered_Drain_Result;
+   begin
+      Core.Initialize (Parser, Core.Require_Object);
+      Direct_Drain (Parser, Input, True, Events, Result);
+      Check (Result.Stop = Core.Drain_Document_Complete, "generic publisher did not complete");
+      Check (Result.Input_First = 0, "generic publisher changed input origin");
+      Check (Result.Consumed = Input'Length, "generic publisher changed consumed count");
+      Check (Result.Produced = 4, "generic publisher changed event count");
+      Check (Events (-19).Kind = Core.Document_Begin, "generic publisher changed document begin");
+      Check (Events (-18).Kind = Core.Object_Begin, "generic publisher changed object begin");
+      Check (Events (-17).Kind = Core.Object_End, "generic publisher changed object end");
+      Check (Events (-16).Kind = Core.Document_End, "generic publisher changed document end");
+
+      Core.Reset (Parser, Core.Accept_Any);
+      declare
+         Null_Events : Direct_Event_Array (31 .. 30);
+      begin
+         Direct_Drain (Parser, Input, True, Null_Events, Result);
+         Check (Result.Stop = Core.Drain_Buffer_Full, "null generic output changed stop");
+         Check (Result.Consumed = 0 and then Result.Produced = 0, "null generic output had effects");
+         Check (Core.State (Parser) = Core.Ready, "null generic output changed parser state");
+
+         declare
+            Step : Core.Next_Result;
+         begin
+            Core.Next (Parser, Input, False, Step);
+            Check (Step.Outcome = Core.Event_Ready, "null generic output latched final input");
+            Check (Step.Item.Kind = Core.Document_Begin, "null generic output changed next event");
+         end;
+      end;
+
+      declare
+         Duplicate_Input : constant Ada.Streams.Stream_Element_Array :=
+           To_Input
+             ("{" & Quote & "a" & Quote & ":0," & Quote & Reverse_Solidus & "u0061" & Quote & ":1}",
+              47);
+         Duplicate_Parser : Core.Parser (1, 0, 0, Core.Preserve_Unchecked);
+         Duplicate_Events : Direct_Event_Array (-31 .. 32);
+         Name_Begins       : Natural := 0;
+         Name_Ends         : Natural := 0;
+      begin
+         Core.Initialize (Duplicate_Parser);
+         Direct_Drain
+           (Duplicate_Parser, Duplicate_Input, True, Duplicate_Events, Result);
+         Check
+           (Result.Stop = Core.Drain_Document_Complete,
+            "generic preserve publisher rejected duplicate names");
+         for Position in Count range 0 .. Result.Produced - 1 loop
+            case Duplicate_Events (Duplicate_Events'First + Offset (Position)).Kind is
+               when Core.Name_Begin =>
+                  Name_Begins := Name_Begins + 1;
+
+               when Core.Name_End   =>
+                  Name_Ends := Name_Ends + 1;
+
+               when others          =>
+                  null;
+            end case;
+         end loop;
+         Check
+           (Name_Begins = 2 and then Name_Ends = 2,
+            "generic preserve publisher changed the duplicate-name transcript");
+      end;
+   end Check_Generic_Publisher;
+
 begin
+   Check_Preserve_Mode;
+   Check_Root_Policy;
+   Check_Final_Input_Latch;
+   Check_Generic_Publisher;
    Check_Drain_Parity;
    Check_Drain_Boundaries;
    Check_Buffered_Drain_Parity;

@@ -50,7 +50,9 @@ The initial strict parser is RFC 8259 JSON over UTF-8 Unicode scalar values. It
 rejects BOMs, malformed UTF-8, unpaired surrogate escapes, raw controls,
 comments, trailing commas, nonstandard/nonfinite numbers, and (when selected)
 decoded-name duplicates. Top-level scalars and object-only roots are distinct
-explicit policies.
+explicit policies. Object-only parsing rejects a recognized non-object root
+leader before consuming it or validating the remainder of that token; a byte
+that cannot lead any JSON value remains a syntax error.
 
 The ordinary compact writer emits UTF-8, no BOM or added whitespace, caller
 member order, exact validated number lexemes, direct solidus/non-ASCII, short

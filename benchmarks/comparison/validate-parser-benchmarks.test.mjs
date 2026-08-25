@@ -41,7 +41,7 @@ function run(records) {
 test("accepts the exact standalone parser matrix", () => {
   const result = run(validRecords());
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /validated 40 exact parser populations/);
+  assert.match(result.stdout, /validated 45 exact parser populations/);
 });
 
 test("rejects a missing parser population", () => {

@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 export const parserMatrix = [
-  ["small_mixed", 37, 1, 7, 3, [[20, 21], [33, 70], [22, 25], [20, 21], [20, 21]]],
+  ["small_mixed", 37, 1, 7, 3, [[20, 1], [33, 37], [22, 3], [20, 1], [20, 1]]],
   [
     "large_mixed",
     564_139,
     3,
     18,
     4,
-    [[262_148, 262_149], [523_182, 1_087_321], [278_295, 313_554],
-      [263_156, 265_360], [262_213, 262_351]],
+    [[262_148, 1_025], [523_182, 564_139], [278_295, 35_259],
+      [263_156, 2_204], [262_213, 1_102]],
   ],
   [
     "string_heavy",
@@ -18,8 +18,8 @@ export const parserMatrix = [
     1,
     4,
     1,
-    [[16_394, 16_395], [1_081_356, 2_162_711], [86_026, 153_611],
-      [20_746, 24_971], [16_666, 16_931]],
+    [[16_394, 65], [1_081_356, 1_081_355], [86_026, 67_585],
+      [20_746, 4_225], [16_666, 265]],
   ],
   [
     "number_heavy",
@@ -27,8 +27,8 @@ export const parserMatrix = [
     1,
     0,
     0,
-    [[147_460, 147_461], [335_876, 622_597], [159_236, 177_157],
-      [148_196, 149_317], [147_506, 147_577]],
+    [[147_460, 577], [335_876, 286_721], [159_236, 17_921],
+      [148_196, 1_121], [147_506, 631]],
   ],
   [
     "long_mantissa_numbers",
@@ -36,8 +36,8 @@ export const parserMatrix = [
     1,
     0,
     0,
-    [[98_308, 98_309], [917_508, 1_802_245], [149_508, 204_805],
-      [101_508, 104_965], [98_508, 98_725]],
+    [[98_308, 385], [917_508, 884_737], [149_508, 55_297],
+      [101_508, 3_457], [98_508, 433]],
   ],
   [
     "deep_nesting",
@@ -45,7 +45,7 @@ export const parserMatrix = [
     256,
     0,
     0,
-    [[517, 518], [517, 1_030], [517, 550], [517, 520], [517, 518]],
+    [[517, 3], [517, 513], [517, 33], [517, 5], [517, 3]],
   ],
   [
     "large_array",
@@ -53,8 +53,8 @@ export const parserMatrix = [
     1,
     0,
     0,
-    [[98_308, 98_309], [98_308, 393_221], [98_308, 116_741],
-      [98_308, 99_461], [98_308, 98_381]],
+    [[98_308, 385], [98_308, 294_913], [98_308, 18_433],
+      [98_308, 1_153], [98_308, 433]],
   ],
   [
     "large_object",
@@ -62,12 +62,14 @@ export const parserMatrix = [
     1,
     136_346,
     16_384,
-    [[65_540, 65_541], [185_502, 469_305], [72_700, 90_438],
-      [65_985, 67_094], [65_567, 65_637]],
+    [[65_540, 257], [185_502, 283_803], [72_700, 17_738],
+      [65_985, 1_109], [65_567, 281]],
   ],
 ];
 
 export const parserChunks = ["monolith", "1", "16", "256", "4096"];
+export const parserDrainEventCapacity = 256;
+export const parserCallerEventBytes = 6_144;
 
 export function parserIdentities() {
   const identities = [];
@@ -76,11 +78,27 @@ export function parserIdentities() {
     for (let index = 0; index < parserChunks.length; index += 1) {
       const [events, calls] = observations[index];
       identities.push(
-        `parser_validation/${fixture}/chunk=${parserChunks[index]}`
+        `parser_validation/api=public_drain/${fixture}/duplicates=reject`
+        + `/chunk=${parserChunks[index]}`
         + `/bytes=${bytes}/depth=${depth}/events=${events}/calls=${calls}`
+        + `/drain_event_capacity=${parserDrainEventCapacity}`
+        + `/caller_event_bytes=${parserCallerEventBytes}`
         + `/name_octets=${nameOctets}/names=${names}`,
       );
     }
+  }
+  const largeObject = parserMatrix.find(([fixture]) => fixture === "large_object");
+  const [fixture, bytes, depth, , , observations] = largeObject;
+  for (let index = 0; index < parserChunks.length; index += 1) {
+    const [events, calls] = observations[index];
+    identities.push(
+      `parser_validation/api=public_drain/${fixture}/duplicates=preserve`
+      + `/chunk=${parserChunks[index]}`
+      + `/bytes=${bytes}/depth=${depth}/events=${events}/calls=${calls}`
+      + `/drain_event_capacity=${parserDrainEventCapacity}`
+      + `/caller_event_bytes=${parserCallerEventBytes}`
+      + "/name_octets=0/names=0",
+    );
   }
   return identities;
 }

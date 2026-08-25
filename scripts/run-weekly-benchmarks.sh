@@ -40,7 +40,10 @@ mkdir -p "$output_directory/provenance/build"
 mkdir -p "$output_directory/provenance/capabilities"
 mkdir -p "$output_directory/fixtures"
 
-if ! "$project_root/scripts/test-benchmark-competitors.sh" "$track" \
+if ! FLYOLOGY_JSON_BENCH_FIXTURE= \
+     FLYOLOGY_JSON_BENCH_CHUNK= \
+     FLYOLOGY_JSON_BENCH_DUPLICATES= \
+     "$project_root/scripts/test-benchmark-competitors.sh" "$track" \
      >"$output_directory/competitor-build.log" 2>&1
 then
   cat "$output_directory/competitor-build.log" >&2
@@ -71,6 +74,9 @@ esac
   FLYOLOGY_JSON_BENCH_TUNING="$track" \
     FLYOLOGY_JSON_BENCH_NATIVE_SWITCH="$native_switch" \
     FLYOLOGY_JSON_BENCH_OUTPUT=json \
+    FLYOLOGY_JSON_BENCH_FIXTURE= \
+    FLYOLOGY_JSON_BENCH_CHUNK= \
+    FLYOLOGY_JSON_BENCH_DUPLICATES= \
     "$parser_executable" >"$output_directory/flyology-parser.jsonl"
 
   if ! FLYOLOGY_JSON_BENCH_TUNING="$track" \

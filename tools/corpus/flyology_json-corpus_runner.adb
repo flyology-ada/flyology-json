@@ -3,18 +3,21 @@ with Ada.Streams;
 with Ada.Streams.Stream_IO;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
-with Flyology_JSON.Parser_Core;
+with Flyology_JSON.Errors;
+with Flyology_JSON.Parsing;
+with Flyology_JSON.Profiles;
 with Interfaces;
 
 procedure Flyology_JSON.Corpus_Runner is
 
-   package Core renames Flyology_JSON.Parser_Core;
+   package Profiles renames Flyology_JSON.Profiles;
+   package Core is new Flyology_JSON.Parsing (Profiles.Reject_Duplicates);
    package Stream_IO renames Ada.Streams.Stream_IO;
 
    use type Ada.Streams.Stream_Element_Count;
    use type Core.Byte_Offset;
-   use type Core.Error_Code;
-   use type Core.Next_Outcome;
+   use type Core.Step_Outcome;
+   use type Flyology_JSON.Errors.Error_Code;
    use type Interfaces.Unsigned_32;
 
    subtype Count is Ada.Streams.Stream_Element_Count;
@@ -31,9 +34,23 @@ procedure Flyology_JSON.Corpus_Runner is
    Campaign_Name_Octets : constant := 262_144;
    Campaign_Names       : constant := Campaign_Depth;
 
+   Campaign_Profile : constant Profiles.Parser_Profile :=
+     (Syntax        => (Family => Profiles.RFC_8259, Version => 1),
+      Unicode       => (Family => Profiles.Unicode_Scalars, Version => 1),
+      Compatibility => (Family => Profiles.No_Extensions, Version => 1),
+      BOM           => Profiles.Reject_BOM,
+      Duplicates    => Profiles.Reject_Duplicates,
+      Top_Level     => Profiles.Accept_Any_Value);
+
    type Parse_Observation is record
-      Outcome    : Core.Next_Outcome := Core.Need_Input;
-      Diagnostic : Core.Diagnostic := (Code => Core.No_Error, Offset => 0);
+      Outcome    : Core.Step_Outcome := Core.Need_Input;
+      Diagnostic : Flyology_JSON.Errors.Diagnostic :=
+        (Code                 => Flyology_JSON.Errors.No_Error,
+         Coordinate           => Flyology_JSON.Errors.No_Coordinate,
+         Offset               => 0,
+         Secondary            => Flyology_JSON.Errors.No_Error,
+         Secondary_Coordinate => Flyology_JSON.Errors.No_Coordinate,
+         Secondary_Offset     => 0);
    end record;
 
    Work_Limit_Exceeded : exception;
@@ -58,7 +75,7 @@ procedure Flyology_JSON.Corpus_Runner is
       Observation : out Parse_Observation)
    is
       Used   : Count := 0;
-      Result : Core.Next_Result;
+      Result : Core.Step_Result;
    begin
       loop
          --  Charging before every call makes a repeated zero-consumption
@@ -68,14 +85,14 @@ procedure Flyology_JSON.Corpus_Runner is
             declare
                First : constant Offset := Input'First + Offset (Used);
             begin
-               Core.Next
+               Core.Step
                  (Parser, Input (First .. Input'Last), Final_Input, Result);
             end;
          else
             declare
                Empty : Ada.Streams.Stream_Element_Array (1 .. 0);
             begin
-               Core.Next (Parser, Empty, Final_Input, Result);
+               Core.Step (Parser, Empty, Final_Input, Result);
             end;
          end if;
 
@@ -113,9 +130,13 @@ procedure Flyology_JSON.Corpus_Runner is
       Parser      :
         Core.Parser (Campaign_Depth, Campaign_Name_Octets, Campaign_Names);
       Observation : Parse_Observation;
+      Diagnostic  : Flyology_JSON.Errors.Diagnostic;
    begin
       Charge_Work (Work_Count (Input'Length));
-      Core.Initialize (Parser);
+      Core.Initialize (Parser, Campaign_Profile, Diagnostic);
+      if Diagnostic.Code /= Flyology_JSON.Errors.No_Error then
+         raise Program_Error with "public corpus parser initialization failed";
+      end if;
       Drain (Parser, Input, True, Observation);
       return Observation;
    end Parse_Monolith;
@@ -127,9 +148,13 @@ procedure Flyology_JSON.Corpus_Runner is
       Parser      :
         Core.Parser (Campaign_Depth, Campaign_Name_Octets, Campaign_Names);
       Observation : Parse_Observation;
+      Diagnostic  : Flyology_JSON.Errors.Diagnostic;
    begin
       Charge_Work (Work_Count (Input'Length));
-      Core.Initialize (Parser);
+      Core.Initialize (Parser, Campaign_Profile, Diagnostic);
+      if Diagnostic.Code /= Flyology_JSON.Errors.No_Error then
+         raise Program_Error with "public corpus parser initialization failed";
+      end if;
 
       if Split = 0 then
          declare
@@ -173,8 +198,12 @@ procedure Flyology_JSON.Corpus_Runner is
       Parser      :
         Core.Parser (Campaign_Depth, Campaign_Name_Octets, Campaign_Names);
       Observation : Parse_Observation;
+      Diagnostic  : Flyology_JSON.Errors.Diagnostic;
    begin
-      Core.Initialize (Parser);
+      Core.Initialize (Parser, Campaign_Profile, Diagnostic);
+      if Diagnostic.Code /= Flyology_JSON.Errors.No_Error then
+         raise Program_Error with "public corpus parser initialization failed";
+      end if;
       if Input'Length = 0 then
          Drain (Parser, Input, True, Observation);
          return Observation;
@@ -208,8 +237,12 @@ procedure Flyology_JSON.Corpus_Runner is
         Core.Parser (Campaign_Depth, Campaign_Name_Octets, Campaign_Names);
       Observation : Parse_Observation;
       Position    : Count := 0;
+      Diagnostic  : Flyology_JSON.Errors.Diagnostic;
    begin
-      Core.Initialize (Parser);
+      Core.Initialize (Parser, Campaign_Profile, Diagnostic);
+      if Diagnostic.Code /= Flyology_JSON.Errors.No_Error then
+         raise Program_Error with "public corpus parser initialization failed";
+      end if;
       if Input'Length = 0 then
          Drain (Parser, Input, True, Observation);
          return Observation;
@@ -251,21 +284,21 @@ procedure Flyology_JSON.Corpus_Runner is
          return Accepted;
       elsif Expectation = "reject_malformed" then
          return
-           Observation.Outcome = Core.Parse_Failed
+           Observation.Outcome = Core.Step_Failed
            and then Observation.Diagnostic.Code
-                    in Core.Unexpected_Token
-                     | Core.Trailing_Input
-                     | Core.Truncated_Input
-                     | Core.Invalid_Literal
-                     | Core.Invalid_Number
-                     | Core.Invalid_UTF8
-                     | Core.Invalid_Escape
-                     | Core.Invalid_Surrogate
-                     | Core.Raw_Control_Character;
+                    in Flyology_JSON.Errors.Unexpected_Token
+                     | Flyology_JSON.Errors.Trailing_Input
+                     | Flyology_JSON.Errors.Truncated_Input
+                     | Flyology_JSON.Errors.Invalid_Literal
+                     | Flyology_JSON.Errors.Invalid_Number
+                     | Flyology_JSON.Errors.Invalid_UTF8
+                     | Flyology_JSON.Errors.Invalid_Escape
+                     | Flyology_JSON.Errors.Invalid_Surrogate
+                     | Flyology_JSON.Errors.Raw_Control_Character;
       elsif Expectation = "reject_duplicate" then
          return
-           Observation.Outcome = Core.Parse_Failed
-           and then Observation.Diagnostic.Code = Core.Duplicate_Name;
+           Observation.Outcome = Core.Step_Failed
+           and then Observation.Diagnostic.Code = Flyology_JSON.Errors.Duplicate_Name;
       else
          raise Program_Error with "unknown corpus expectation: " & Expectation;
       end if;
@@ -411,8 +444,8 @@ procedure Flyology_JSON.Corpus_Runner is
          Length   : constant Work_Count :=
            Work_Count (Stream_IO.Size (Input_File));
          --  One monolithic parse plus Length + 1 split parses.  Each parse
-         --  requires at least one Next call and reserves Length planned input
-         --  octets.  Additional Next calls are charged by the runtime ledger.
+         --  requires at least one Step call and reserves Length planned input
+         --  octets.  Additional Step calls are charged by the runtime ledger.
          Required : constant Work_Count := Every_Split_Minimum_Work (Length);
       begin
          Stream_IO.Close (Input_File);

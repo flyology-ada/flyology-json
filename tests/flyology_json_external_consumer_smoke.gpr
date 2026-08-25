@@ -1,0 +1,18 @@
+with "../flyology_json.gpr";
+
+project Flyology_JSON_External_Consumer_Smoke is
+   for Source_Dirs use (".");
+   for Object_Dir use "../obj/external-consumer-smoke";
+   for Exec_Dir use "bin";
+   for Create_Missing_Dirs use "True";
+   for Main use ("flyology_json_external_consumer_smoke.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnatwa", "-gnatwe", "-gnatVa", "-gnato13", "-gnatE", "-gnata", "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+end Flyology_JSON_External_Consumer_Smoke;
