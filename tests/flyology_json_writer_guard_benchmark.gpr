@@ -1,0 +1,18 @@
+project Flyology_JSON_Writer_Guard_Benchmark is
+
+   for Source_Dirs use ("../src", ".");
+   for Object_Dir use "../obj/writer-guard-benchmark";
+   for Exec_Dir use "bin";
+   for Create_Missing_Dirs use "True";
+   for Main use ("flyology_json-writer_guard_benchmark.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-O3", "-gnatp", "-gnatn", "-gnatwn", "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+end Flyology_JSON_Writer_Guard_Benchmark;

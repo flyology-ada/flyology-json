@@ -1,0 +1,34 @@
+project Flyology_JSON_Writer_Core_Tests is
+
+   for Source_Dirs use ("../src", ".");
+   for Object_Dir use "../obj/writer-core-tests";
+   for Exec_Dir use "bin";
+   for Create_Missing_Dirs use "True";
+   for Main use ("flyology_json-writer_core_tests.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022",
+         "-gnatwa",
+         "-gnatwe",
+         "-gnatVa",
+         "-gnato13",
+         "-gnatE",
+         "-gnata",
+         "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Kind ("Ada") use "spaces";
+      for Indentation_Continuation ("Ada") use "2";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
+
+end Flyology_JSON_Writer_Core_Tests;
