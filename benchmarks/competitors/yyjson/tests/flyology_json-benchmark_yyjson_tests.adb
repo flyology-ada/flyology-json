@@ -106,6 +106,55 @@ begin
    Check_Rejected ('"' & Character'Val (1) & '"', First => 30);
 
    declare
+      Text : constant String :=
+        "{""text"":""line\n/\u001F/euro:"
+        & Character'Val (16#E2#)
+        & Character'Val (16#82#)
+        & Character'Val (16#AC#)
+        & """,""value"":123,""ok"":true}";
+      Data        : constant Ada.Streams.Stream_Element_Array := Octets (Text, -91);
+      Expected    : constant Ada.Streams.Stream_Element_Array := Octets (Text, 117);
+      Context     : Prepared_Document;
+      Preparation : Parse_Observation;
+      Observation : Write_Observation;
+      Matches     : Boolean;
+   begin
+      Check (not Is_Prepared (Context), "new write context is unexpectedly prepared");
+      Prepare_Write (Data, Context, Preparation);
+      Check (Preparation.Status = Accepted, "writer DOM preparation rejected valid JSON");
+      Check (Is_Prepared (Context), "successful writer DOM preparation was not retained");
+
+      Check_Write_Output (Context, Expected, Observation, Matches);
+      Check (Observation.Status = Write_Succeeded, "yyjson DOM serialization failed");
+      Check (Observation.Error_Code = 0, "successful serialization retained an error code");
+      Check
+        (Observation.Output_Octets = Interfaces.Unsigned_64 (Expected'Length),
+         "serialization reported the wrong output length");
+      Check (Observation.Checksum /= 0, "serialization checksum was not observable");
+      Check (Matches, "yyjson default compact output changed");
+
+      Write (Context, Observation);
+      Check (Observation.Status = Write_Succeeded, "repeated yyjson DOM serialization failed");
+      Release (Context);
+      Release (Context);
+      Check (not Is_Prepared (Context), "writer DOM release was not idempotent");
+
+      Write (Context, Observation);
+      Check (Observation.Status = Write_Rejected, "unprepared writer context was accepted");
+      Check (Observation.Output_Octets = 0, "unprepared writer published output length");
+   end;
+
+   declare
+      Context     : Prepared_Document;
+      Preparation : Parse_Observation;
+   begin
+      Prepare_Write (Octets ("[1,]", -44), Context, Preparation);
+      Check (Preparation.Status = Rejected, "malformed writer DOM preparation was accepted");
+      Check (not Is_Prepared (Context), "failed writer DOM preparation retained a document");
+      Release (Context);
+   end;
+
+   declare
       BOM : constant Ada.Streams.Stream_Element_Array :=
         [41 => 16#EF#, 42 => 16#BB#, 43 => 16#BF#, 44 => Character'Pos ('{'),
          45 => Character'Pos ('}')];

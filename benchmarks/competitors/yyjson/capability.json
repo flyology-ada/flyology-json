@@ -5,10 +5,10 @@
   "source_revision": "8b4a38dc994a110abaec8a400615567bd996105f",
   "boundary": {
     "kind": "direct_c",
-    "reason": "Ada imports yyjson_read_opts directly; one C function wraps inline document cleanup.",
+    "reason": "Ada imports yyjson_read_opts and yyjson_write_opts directly; one C function wraps header-inline immutable document cleanup.",
     "retains_input": false,
     "hidden_io": false,
-    "abi_test": "test.sh checks C/Ada sizes and offsets, linked symbols, errors, and document ownership."
+    "abi_test": "test.sh checks C/Ada read and write error sizes and offsets, linked symbols, errors, exact writer output, and document ownership."
   },
   "build_tracks": {
     "portable": {
@@ -71,16 +71,21 @@
       "profile_ids": [],
       "output_policy_ids": [],
       "observable_result": "not available",
-      "limitations": ["No yyjson writer boundary is included in this adapter."]
+      "limitations": ["No yyjson streaming writer boundary is included in this adapter."]
     },
     {
       "lane": "write_dom",
-      "supported": false,
-      "api": "not exposed by this adapter",
-      "profile_ids": [],
-      "output_policy_ids": [],
-      "observable_result": "not available",
-      "limitations": ["No yyjson writer boundary is included in this adapter."]
+      "supported": true,
+      "api": "Prepare_Write constructs one reusable yyjson DOM outside timing; Write calls yyjson_write_opts with zero flags directly.",
+      "profile_ids": ["yyjson-prepared-dom-values"],
+      "output_policy_ids": ["yyjson-write-zero-flags"],
+      "observable_result": "Exact output byte count plus an FNV-1a checksum over every output byte before the allocated buffer is freed.",
+      "limitations": [
+        "This is a preconstructed-DOM serializer, not a streaming writer; it must not be ranked as write_stream.",
+        "DOM preparation, including yyjson's private input copy and number conversion, occurs outside timing.",
+        "yyjson allocates and frees one complete output buffer during each timed operation.",
+        "Parsed numeric values may not preserve the input lexeme; only fixtures whose expected output matches this policy are admitted."
+      ]
     },
     {
       "lane": "parse_write",
@@ -111,9 +116,43 @@
         "A zero-length input is rejected.",
         "DOM size is bounded by size_t, address space, and allocator capacity."
       ]
+    },
+    {
+      "profile_id": "yyjson-prepared-dom-values",
+      "top_level_scalars": true,
+      "bom": "reject",
+      "malformed_utf8": "reject",
+      "unpaired_surrogates": "reject",
+      "duplicate_names": "preserve_all",
+      "comments": false,
+      "trailing_commas": false,
+      "raw_controls": false,
+      "nonstandard_numbers": false,
+      "nonfinite_numbers": false,
+      "number_handling": "lossy_conversion",
+      "maximum_depth": null,
+      "other_limits": [
+        "This identity describes the reusable value representation supplied to write_dom, not timed parsing.",
+        "The maintained preflight prepares it with yyjson_read_opts zero flags outside timing.",
+        "DOM and output size are bounded by size_t, address space, and allocator capacity."
+      ]
     }
   ],
-  "output_policies": [],
+  "output_policies": [
+    {
+      "output_policy_id": "yyjson-write-zero-flags",
+      "encoding": "UTF-8",
+      "bom": "none",
+      "whitespace": "compact with no added whitespace",
+      "member_order": "preserve yyjson DOM insertion order",
+      "number_spelling": "render converted yyjson numeric values; exact source lexemes are not guaranteed",
+      "non_ascii": "emit valid UTF-8 directly",
+      "solidus": "unescaped",
+      "control_escaping": "short escapes where available; otherwise uppercase hexadecimal Unicode escapes",
+      "final_suffix": "none",
+      "canonical": false
+    }
+  ],
   "memory": {
     "input_access": "read_only",
     "required_readable_padding_octets": 0,

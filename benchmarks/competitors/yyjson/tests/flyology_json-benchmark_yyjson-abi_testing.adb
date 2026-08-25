@@ -23,6 +23,16 @@ package body Flyology_JSON.Benchmark_YYJSON.ABI_Testing is
         Convention    => C,
         External_Name => "flyology_bench_yyjson_sizeof_read_code";
 
+   function C_Sizeof_Write_Error return C_Size
+   with Import,
+        Convention    => C,
+        External_Name => "flyology_bench_yyjson_sizeof_write_error";
+
+   function C_Sizeof_Write_Code return C_Size
+   with Import,
+        Convention    => C,
+        External_Name => "flyology_bench_yyjson_sizeof_write_code";
+
    function C_Offsetof_Data_Read return C_Size
    with Import,
         Convention    => C,
@@ -63,6 +73,16 @@ package body Flyology_JSON.Benchmark_YYJSON.ABI_Testing is
         Convention    => C,
         External_Name => "flyology_bench_yyjson_offsetof_error_message";
 
+   function C_Offsetof_Write_Error_Code return C_Size
+   with Import,
+        Convention    => C,
+        External_Name => "flyology_bench_yyjson_offsetof_write_error_code";
+
+   function C_Offsetof_Write_Error_Message return C_Size
+   with Import,
+        Convention    => C,
+        External_Name => "flyology_bench_yyjson_offsetof_write_error_message";
+
    function Compatible return Boolean is
       Doc : constant Document :=
         (Root              => System.Null_Address,
@@ -75,11 +95,17 @@ package body Flyology_JSON.Benchmark_YYJSON.ABI_Testing is
          String_Pool       => System.Null_Address);
       Err : constant Read_Error :=
         (Code => 0, Message => System.Null_Address, Position => 0);
+      Write_Err : constant Write_Error :=
+        (Code => 0, Message => System.Null_Address);
    begin
       return
         C_Sizeof_Document = C_Size (Document'Size / System.Storage_Unit)
         and then C_Sizeof_Read_Error = C_Size (Read_Error'Size / System.Storage_Unit)
         and then C_Sizeof_Read_Code =
+          C_Size (Interfaces.C.unsigned'Size / System.Storage_Unit)
+        and then C_Sizeof_Write_Error =
+          C_Size (Write_Error'Size / System.Storage_Unit)
+        and then C_Sizeof_Write_Code =
           C_Size (Interfaces.C.unsigned'Size / System.Storage_Unit)
         and then C_Offsetof_Root = C_Size (Doc.Root'Position)
         and then C_Offsetof_Allocator_Context = C_Size (Doc.Allocator_Context'Position)
@@ -88,7 +114,10 @@ package body Flyology_JSON.Benchmark_YYJSON.ABI_Testing is
         and then C_Offsetof_String_Pool = C_Size (Doc.String_Pool'Position)
         and then C_Offsetof_Error_Code = C_Size (Err.Code'Position)
         and then C_Offsetof_Error_Message = C_Size (Err.Message'Position)
-        and then C_Offsetof_Error_Position = C_Size (Err.Position'Position);
+        and then C_Offsetof_Error_Position = C_Size (Err.Position'Position)
+        and then C_Offsetof_Write_Error_Code = C_Size (Write_Err.Code'Position)
+        and then
+          C_Offsetof_Write_Error_Message = C_Size (Write_Err.Message'Position);
    end Compatible;
 
 end Flyology_JSON.Benchmark_YYJSON.ABI_Testing;

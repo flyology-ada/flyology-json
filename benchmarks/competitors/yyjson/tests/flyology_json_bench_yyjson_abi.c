@@ -16,6 +16,14 @@ size_t flyology_bench_yyjson_sizeof_read_code(void) {
     return sizeof(yyjson_read_code);
 }
 
+size_t flyology_bench_yyjson_sizeof_write_error(void) {
+    return sizeof(yyjson_write_err);
+}
+
+size_t flyology_bench_yyjson_sizeof_write_code(void) {
+    return sizeof(yyjson_write_code);
+}
+
 size_t flyology_bench_yyjson_offsetof_root(void) {
     return offsetof(yyjson_doc, root);
 }
@@ -46,4 +54,12 @@ size_t flyology_bench_yyjson_offsetof_error_code(void) {
 
 size_t flyology_bench_yyjson_offsetof_error_message(void) {
     return offsetof(yyjson_read_err, msg);
+}
+
+size_t flyology_bench_yyjson_offsetof_write_error_code(void) {
+    return offsetof(yyjson_write_err, code);
+}
+
+size_t flyology_bench_yyjson_offsetof_write_error_message(void) {
+    return offsetof(yyjson_write_err, msg);
 }

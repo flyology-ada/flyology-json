@@ -9,6 +9,8 @@
 /benchmarks/competitors/rust/target/
 /benchmarks/comparison_bin/
 /benchmarks/comparison_obj/
+/benchmarks/writer_bin/
+/benchmarks/writer_obj/
 build/
 docs/api/
 

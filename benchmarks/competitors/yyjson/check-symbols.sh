@@ -22,10 +22,17 @@ fi
 symbols=$(nm "$executable")
 
 printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}yyjson_read_opts$' >/dev/null
+printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}yyjson_write_opts$' >/dev/null
 printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}flyology_bench_yyjson_doc_free$' >/dev/null
+printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}free$' >/dev/null
 
 if printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}flyology_bench_yyjson_read' >/dev/null; then
     printf 'yyjson read is hidden behind a shim instead of imported directly\n' >&2
+    exit 1
+fi
+
+if printf '%s\n' "$symbols" | grep '[[:space:]]_\{0,1\}flyology_bench_yyjson_write' >/dev/null; then
+    printf 'yyjson write is hidden behind a shim instead of imported directly\n' >&2
     exit 1
 fi
 
