@@ -27,6 +27,11 @@ struct flyology_json_cpp_bench_observation {
   uint64_t input_bytes;
 };
 
+struct flyology_json_cpp_bench_write_observation {
+  uint64_t output_bytes;
+  uint64_t checksum;
+};
+
 /* Parses and recursively visits one complete document with simdjson's DOM
  * API. `input` must identify `capacity` readable bytes and `length` must be no
  * greater than capacity. The capacity must include the padding reported by
@@ -61,6 +66,46 @@ int32_t flyology_json_bench_rapidjson_events(
     const uint8_t *input,
     uint64_t length,
     struct flyology_json_cpp_bench_observation *observation);
+
+/* Constructs one reusable RapidJSON DOM from a complete document. `input`
+ * must identify `length` readable bytes and is not retained. `prepared` is
+ * written only on success, must not overlap input, and transfers ownership to
+ * the caller. The caller must eventually pass that exact live pointer to
+ * flyology_json_bench_rapidjson_release_write().
+ */
+int32_t flyology_json_bench_rapidjson_prepare_write(
+    const uint8_t *input,
+    uint64_t length,
+    void **prepared);
+
+/* Serializes a prepared RapidJSON DOM into a newly allocated StringBuffer,
+ * computes FNV-1a over every output byte, and destroys the buffer before
+ * returning. `prepared` must be one live pointer returned by prepare_write;
+ * `observation` must identify nonoverlapping writable storage and is written
+ * only on success.
+ */
+int32_t flyology_json_bench_rapidjson_write_dom(
+    const void *prepared,
+    struct flyology_json_cpp_bench_write_observation *observation);
+
+/* Performs the same serialization and observation as write_dom and also
+ * compares the result with `expected`. `matches` and `observation` are written
+ * only on success. Both outputs must identify mutually nonoverlapping writable
+ * storage and must not overlap expected. This preflight operation is not timed
+ * by the harness.
+ */
+int32_t flyology_json_bench_rapidjson_check_write(
+    const void *prepared,
+    const uint8_t *expected,
+    uint64_t expected_length,
+    struct flyology_json_cpp_bench_write_observation *observation,
+    int32_t *matches);
+
+/* Releases a prepared DOM. A null pointer is accepted as a no-op; every other
+ * pointer must be one live pointer returned by prepare_write and not yet
+ * released.
+ */
+void flyology_json_bench_rapidjson_release_write(void *prepared);
 
 #ifdef __cplusplus
 }

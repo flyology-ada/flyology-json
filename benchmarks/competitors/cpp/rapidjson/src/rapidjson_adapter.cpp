@@ -7,16 +7,21 @@
 #include "rapidjson/document.h"
 #include "rapidjson/memorystream.h"
 #include "rapidjson/reader.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 
+#include <cstring>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <new>
 #include <string_view>
 
 namespace {
 
 using Observation = flyology_json_cpp_bench_observation;
+using WriteObservation = flyology_json_cpp_bench_write_observation;
 
 static_assert(sizeof(Observation) == 40);
 static_assert(alignof(Observation) == alignof(uint64_t));
@@ -25,6 +30,35 @@ static_assert(offsetof(Observation, event_count) == 8);
 static_assert(offsetof(Observation, scalar_count) == 16);
 static_assert(offsetof(Observation, member_name_count) == 24);
 static_assert(offsetof(Observation, input_bytes) == 32);
+static_assert(sizeof(WriteObservation) == 16);
+static_assert(alignof(WriteObservation) == alignof(uint64_t));
+static_assert(offsetof(WriteObservation, output_bytes) == 0);
+static_assert(offsetof(WriteObservation, checksum) == 8);
+
+struct PreparedWrite final {
+  rapidjson::Document document;
+};
+
+uint64_t fnv1a64(const char *data, size_t length) {
+  uint64_t result = UINT64_C(0xcbf29ce484222325);
+  for (size_t index = 0; index < length; ++index) {
+    result = (result ^ static_cast<unsigned char>(data[index])) *
+             UINT64_C(0x100000001b3);
+  }
+  return result;
+}
+
+bool serialize(const PreparedWrite &prepared,
+               rapidjson::StringBuffer &output,
+               WriteObservation &observation) {
+  rapidjson::Writer<rapidjson::StringBuffer> writer(output);
+  if (!prepared.document.Accept(writer) || !writer.IsComplete()) {
+    return false;
+  }
+  observation = {static_cast<uint64_t>(output.GetSize()),
+                 fnv1a64(output.GetString(), output.GetSize())};
+  return true;
+}
 
 void mix_bytes(Observation &result, uint64_t kind, std::string_view bytes) {
   result.event_count += 1;
@@ -201,4 +235,87 @@ extern "C" int32_t flyology_json_bench_rapidjson_events(
   } catch (...) {
     return FLYOLOGY_JSON_CPP_BENCH_INTERNAL_ERROR;
   }
+}
+
+extern "C" int32_t flyology_json_bench_rapidjson_prepare_write(
+    const uint8_t *input,
+    uint64_t length,
+    void **prepared) {
+  if (input == nullptr || prepared == nullptr ||
+      length > std::numeric_limits<size_t>::max()) {
+    return FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT;
+  }
+
+  try {
+    std::unique_ptr<PreparedWrite> result(new PreparedWrite);
+    result->document.Parse<rapidjson::kParseValidateEncodingFlag>(
+        reinterpret_cast<const char *>(input), static_cast<size_t>(length));
+    if (result->document.HasParseError()) {
+      return FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR;
+    }
+    *prepared = result.release();
+    return FLYOLOGY_JSON_CPP_BENCH_OK;
+  } catch (const std::bad_alloc &) {
+    return FLYOLOGY_JSON_CPP_BENCH_ALLOCATION_FAILURE;
+  } catch (...) {
+    return FLYOLOGY_JSON_CPP_BENCH_INTERNAL_ERROR;
+  }
+}
+
+extern "C" int32_t flyology_json_bench_rapidjson_write_dom(
+    const void *prepared,
+    WriteObservation *observation) {
+  if (prepared == nullptr || observation == nullptr) {
+    return FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT;
+  }
+
+  try {
+    rapidjson::StringBuffer output;
+    WriteObservation result{};
+    if (!serialize(*static_cast<const PreparedWrite *>(prepared), output, result)) {
+      return FLYOLOGY_JSON_CPP_BENCH_INTERNAL_ERROR;
+    }
+    *observation = result;
+    return FLYOLOGY_JSON_CPP_BENCH_OK;
+  } catch (const std::bad_alloc &) {
+    return FLYOLOGY_JSON_CPP_BENCH_ALLOCATION_FAILURE;
+  } catch (...) {
+    return FLYOLOGY_JSON_CPP_BENCH_INTERNAL_ERROR;
+  }
+}
+
+extern "C" int32_t flyology_json_bench_rapidjson_check_write(
+    const void *prepared,
+    const uint8_t *expected,
+    uint64_t expected_length,
+    WriteObservation *observation,
+    int32_t *matches) {
+  if (prepared == nullptr || observation == nullptr || matches == nullptr ||
+      (expected == nullptr && expected_length != 0) ||
+      expected_length > std::numeric_limits<size_t>::max()) {
+    return FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT;
+  }
+
+  try {
+    rapidjson::StringBuffer output;
+    WriteObservation result{};
+    if (!serialize(*static_cast<const PreparedWrite *>(prepared), output, result)) {
+      return FLYOLOGY_JSON_CPP_BENCH_INTERNAL_ERROR;
+    }
+    const size_t length = static_cast<size_t>(expected_length);
+    const bool equal = output.GetSize() == length &&
+                       (length == 0 ||
+                        std::memcmp(output.GetString(), expected, length) == 0);
+    *observation = result;
+    *matches = equal ? 1 : 0;
+    return FLYOLOGY_JSON_CPP_BENCH_OK;
+  } catch (const std::bad_alloc &) {
+    return FLYOLOGY_JSON_CPP_BENCH_ALLOCATION_FAILURE;
+  } catch (...) {
+    return FLYOLOGY_JSON_CPP_BENCH_INTERNAL_ERROR;
+  }
+}
+
+extern "C" void flyology_json_bench_rapidjson_release_write(void *prepared) {
+  delete static_cast<PreparedWrite *>(prepared);
 }

@@ -11,6 +11,7 @@ procedure Flyology_JSON.Benchmark_Rust_Tests is
    use type Ada.Streams.Stream_Element_Count;
    use type Ada.Streams.Stream_Element_Array;
    use type Adapter.Parse_Status;
+   use type Adapter.Write_Status;
    use type Adapter.Implementation;
    use type Interfaces.Unsigned_64;
 
@@ -84,4 +85,52 @@ begin
          end if;
       end;
    end loop;
+
+   for Kind in Adapter.Serde_JSON .. Adapter.Sonic_RS loop
+      declare
+         Data    : constant Ada.Streams.Stream_Element_Array := Octets (Valid_Text, -29);
+         Context : Adapter.Prepared_Document;
+         Result  : Adapter.Write_Observation;
+         Matches : Boolean;
+      begin
+         Adapter.Prepare_Write (Kind, Data, Context, Result);
+         if Result.Status /= Adapter.Write_Succeeded or else not Adapter.Is_Prepared (Context) then
+            raise Program_Error with "Rust writer preparation failed";
+         end if;
+         Adapter.Check_Write_Output (Context, Data, Result, Matches);
+         if Result.Status /= Adapter.Write_Succeeded
+           or else not Matches
+           or else Result.Output_Octets /= Data'Length
+         then
+            raise Program_Error with "Rust writer exact-output preflight failed";
+         end if;
+         Adapter.Write (Context, Result);
+         if Result.Status /= Adapter.Write_Succeeded
+           or else Result.Output_Octets /= Data'Length
+           or else Result.Checksum = 0
+         then
+            raise Program_Error with "Rust writer observation failed";
+         end if;
+         Adapter.Release (Context);
+         Adapter.Release (Context);
+         if Adapter.Is_Prepared (Context) then
+            raise Program_Error with "Rust writer release retained context";
+         end if;
+      exception
+         when others =>
+            Adapter.Release (Context);
+            raise;
+      end;
+   end loop;
+
+   declare
+      Data    : constant Ada.Streams.Stream_Element_Array := Octets (Valid_Text, 13);
+      Context : Adapter.Prepared_Document;
+      Result  : Adapter.Write_Observation;
+   begin
+      Adapter.Prepare_Write (Adapter.SIMD_JSON, Data, Context, Result);
+      if Result.Status /= Adapter.Write_Unsupported or else Adapter.Is_Prepared (Context) then
+         raise Program_Error with "simd-json writer lane was not explicitly unsupported";
+      end if;
+   end;
 end Flyology_JSON.Benchmark_Rust_Tests;

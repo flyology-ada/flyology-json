@@ -1,4 +1,4 @@
-# Rust parser benchmark adapters
+# Rust benchmark adapters
 
 This benchmark-only static library exposes one coarse whole-document C ABI call
 for each admitted Rust parser:
@@ -56,6 +56,14 @@ copy and its allocation are therefore inside the timed parse_dom operation.
 Traversal is recursive. The admitted benchmark fixture matrix is preflighted
 and bounded to depth 256; deeper accepted values and allocator exhaustion may
 abort the process and are not represented as the ordinary panic status.
+
+serde_json and sonic-rs additionally expose coarse `write_dom` calls. A reusable
+DOM is prepared outside timing. Each timed call serializes with the crate's
+maintained `to_vec` API, allocates one complete output vector, hashes every
+output byte with FNV-1a, and drops the vector. Exact-output preflight admits the
+same 1 MiB raw string and 4,096-object nested fixtures as the Flyology and
+yyjson writer lanes. simd-json remains parser-only because no additional
+serializer boundary was admitted for this comparison.
 
 Run both tracks with:
 

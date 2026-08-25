@@ -33,6 +33,16 @@ preflight grows its internal decoded-token stack before measurement. This lane
 still requires one complete contiguous input and preserves duplicate names
 rather than rejecting them.
 
+The `write_dom` lane prepares one reusable `rapidjson::Document` outside the
+timed region, then passes it to `rapidjson::Writer<rapidjson::StringBuffer>`.
+Each timed operation includes output-buffer allocation and growth, compact DOM
+serialization, FNV-1a observation of every output byte, and buffer destruction.
+The harness first requires exact byte equality with the maintained
+`large_raw_string` and `nested_structures` outputs used by yyjson and the public
+Flyology writer. It is a preconstructed-DOM lane, not a streaming-writer lane.
+Numeric values in the DOM may have lost their source spelling, so only fixtures
+whose exact output matches RapidJSON's policy are admitted.
+
 The exact behavior used for comparisons—including the DOM lane's accepted BOM,
 the event lane's rejected BOM, UTF-8 validation, duplicate preservation, number
-handling, and unsupported lanes—is in `capability.json`.
+handling, writer output policy, and unsupported lanes—is in `capability.json`.

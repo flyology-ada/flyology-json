@@ -20,6 +20,14 @@ _Static_assert(offsetof(struct flyology_json_cpp_bench_observation, member_name_
                "member-name count offset changed");
 _Static_assert(offsetof(struct flyology_json_cpp_bench_observation, input_bytes) == 32,
                "input-byte count offset changed");
+_Static_assert(sizeof(struct flyology_json_cpp_bench_write_observation) == 16,
+               "write observation size changed");
+_Static_assert(offsetof(struct flyology_json_cpp_bench_write_observation,
+                        output_bytes) == 0,
+               "output-byte count offset changed");
+_Static_assert(offsetof(struct flyology_json_cpp_bench_write_observation,
+                        checksum) == 8,
+               "write checksum offset changed");
 
 typedef int32_t (*simdjson_function)(
     const uint8_t *, uint64_t, uint64_t,
@@ -27,6 +35,14 @@ typedef int32_t (*simdjson_function)(
 typedef int32_t (*rapidjson_function)(
     const uint8_t *, uint64_t,
     struct flyology_json_cpp_bench_observation *);
+typedef int32_t (*rapidjson_prepare_write_function)(
+    const uint8_t *, uint64_t, void **);
+typedef int32_t (*rapidjson_write_function)(
+    const void *, struct flyology_json_cpp_bench_write_observation *);
+typedef int32_t (*rapidjson_check_write_function)(
+    const void *, const uint8_t *, uint64_t,
+    struct flyology_json_cpp_bench_write_observation *, int32_t *);
+typedef void (*rapidjson_release_write_function)(void *);
 
 static int simdjson_status(const uint8_t *input, size_t length) {
   uint8_t storage[512];
@@ -85,9 +101,18 @@ int main(void) {
   simdjson_function simd_symbol = flyology_json_bench_simdjson_dom;
   rapidjson_function rapid_symbol = flyology_json_bench_rapidjson_dom;
   rapidjson_function events_symbol = flyology_json_bench_rapidjson_events;
+  rapidjson_prepare_write_function prepare_write_symbol =
+      flyology_json_bench_rapidjson_prepare_write;
+  rapidjson_write_function write_symbol = flyology_json_bench_rapidjson_write_dom;
+  rapidjson_check_write_function check_write_symbol =
+      flyology_json_bench_rapidjson_check_write;
+  rapidjson_release_write_function release_write_symbol =
+      flyology_json_bench_rapidjson_release_write;
   const uint64_t padding = flyology_json_bench_simdjson_padding();
 
   if (simd_symbol == NULL || rapid_symbol == NULL || events_symbol == NULL ||
+      prepare_write_symbol == NULL || write_symbol == NULL ||
+      check_write_symbol == NULL || release_write_symbol == NULL ||
       padding != 64) {
     return 1;
   }
@@ -198,6 +223,56 @@ int main(void) {
   if (!expect_both(nonfinite, sizeof(nonfinite) - 1,
                    FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR)) {
     return 70;
+  }
+
+  {
+    static const uint8_t expected[] =
+        "{\"id\":123456789,\"values\":[true,null]}";
+    static const uint8_t different[] =
+        "{\"id\":123456789,\"values\":[false,null]}";
+    void *prepared = NULL;
+    struct flyology_json_cpp_bench_write_observation written = {17, 19};
+    struct flyology_json_cpp_bench_write_observation unchanged = written;
+    int32_t matches = 23;
+
+    if (prepare_write_symbol(expected, sizeof(expected) - 1, &prepared) !=
+            FLYOLOGY_JSON_CPP_BENCH_OK ||
+        prepared == NULL ||
+        write_symbol(prepared, &written) != FLYOLOGY_JSON_CPP_BENCH_OK ||
+        written.output_bytes != sizeof(expected) - 1) {
+      release_write_symbol(prepared);
+      return 71;
+    }
+    if (check_write_symbol(prepared, expected, sizeof(expected) - 1,
+                           &written, &matches) !=
+            FLYOLOGY_JSON_CPP_BENCH_OK ||
+        matches != 1 ||
+        check_write_symbol(prepared, different, sizeof(different) - 1,
+                           &written, &matches) !=
+            FLYOLOGY_JSON_CPP_BENCH_OK ||
+        matches != 0) {
+      release_write_symbol(prepared);
+      return 72;
+    }
+    unchanged = written;
+    matches = 23;
+    if (write_symbol(NULL, &written) !=
+            FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT ||
+        memcmp(&written, &unchanged, sizeof(written)) != 0 ||
+        check_write_symbol(prepared, NULL, 1, &written, &matches) !=
+            FLYOLOGY_JSON_CPP_BENCH_INVALID_ARGUMENT ||
+        memcmp(&written, &unchanged, sizeof(written)) != 0 || matches != 23) {
+      release_write_symbol(prepared);
+      return 73;
+    }
+    release_write_symbol(prepared);
+    release_write_symbol(NULL);
+    prepared = (void *)(uintptr_t)1;
+    if (prepare_write_symbol(malformed, sizeof(malformed) - 1, &prepared) !=
+            FLYOLOGY_JSON_CPP_BENCH_PARSE_ERROR ||
+        prepared != (void *)(uintptr_t)1) {
+      return 74;
+    }
   }
 
   return 0;

@@ -16,6 +16,9 @@ procedure Flyology_JSON.Benchmark_CPP_Tests is
    package Rapid renames Flyology_JSON.Benchmark_CPP.Rapidjson;
    package Simd renames Flyology_JSON.Benchmark_CPP.Simdjson;
 
+   use type Rapid.Write_Status;
+   use type Rapid.Write_Observation;
+
    subtype Offset is Ada.Streams.Stream_Element_Offset;
 
    procedure Check (Condition : Boolean; Message : String) is
@@ -116,6 +119,18 @@ procedure Flyology_JSON.Benchmark_CPP_Tests is
       return Result;
    end Nested_Array;
 
+   function FNV1A64
+     (Data : Ada.Streams.Stream_Element_Array) return Interfaces.Unsigned_64
+   is
+      Result : Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
+   begin
+      for Byte of Data loop
+         Result :=
+           (Result xor Interfaces.Unsigned_64 (Byte)) * 16#0000_0100_0000_01B3#;
+      end loop;
+      return Result;
+   end FNV1A64;
+
 begin
    Check (Simd.Required_Padding = 64, "pinned simdjson padding changed");
 
@@ -204,6 +219,48 @@ begin
    for Iteration in 1 .. 1_000 loop
       Check_Valid ("{""owned"":true}", Offset (Iteration mod 31 - 15));
    end loop;
+
+   declare
+      Input       : Ada.Streams.Stream_Element_Array :=
+        Octets ("{""id"":123456789,""values"":[true,null]}", -83);
+      Expected    : constant Ada.Streams.Stream_Element_Array := Input;
+      Different   : constant Ada.Streams.Stream_Element_Array :=
+        Octets ("{""id"":123456789,""values"":[false,null]}", 207);
+      Malformed   : constant Ada.Streams.Stream_Element_Array := Octets ("[1,]", -4);
+      Context     : Rapid.Prepared_Document;
+      Parse_State : Parse_Status;
+      Written     : Rapid.Write_Observation;
+      Matches     : Boolean;
+   begin
+      Rapid.Prepare_Write (Input, Context, Parse_State);
+      Check (Parse_State = Accepted, "RapidJSON write DOM preparation failed");
+      Check (Rapid.Is_Prepared (Context), "RapidJSON did not retain its prepared DOM");
+      Input := [others => Character'Pos ('x')];
+      Rapid.Write (Context, Written);
+      Check (Written.Status = Rapid.Write_Succeeded, "RapidJSON DOM write failed");
+      Check
+        (Written.Output_Octets = Interfaces.Unsigned_64 (Expected'Length),
+         "RapidJSON DOM output length changed");
+      Check (Written.Checksum = FNV1A64 (Expected), "RapidJSON DOM checksum changed");
+      Rapid.Check_Write_Output (Context, Expected, Written, Matches);
+      Check
+        (Written.Status = Rapid.Write_Succeeded and then Matches,
+         "RapidJSON DOM exact-output check failed");
+      Rapid.Check_Write_Output (Context, Different, Written, Matches);
+      Check
+        (Written.Status = Rapid.Write_Succeeded and then not Matches,
+         "RapidJSON DOM mismatch check accepted different bytes");
+
+      Rapid.Prepare_Write (Malformed, Context, Parse_State);
+      Check (Parse_State = Parse_Error, "RapidJSON prepared malformed writer input");
+      Check (not Rapid.Is_Prepared (Context), "failed preparation retained an old DOM");
+      Rapid.Write (Context, Written);
+      Check
+        (Written = (Status => Rapid.Write_Invalid_Argument, others => 0),
+         "unprepared RapidJSON write published output");
+      Rapid.Release (Context);
+      Rapid.Release (Context);
+   end;
 
    Ada.Text_IO.Put_Line ("C++ competitor adapter tests passed");
 end Flyology_JSON.Benchmark_CPP_Tests;

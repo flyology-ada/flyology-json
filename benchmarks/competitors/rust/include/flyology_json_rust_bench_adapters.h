@@ -32,7 +32,8 @@ enum flyology_json_rust_bench_status {
   FLYOLOGY_JSON_RUST_BENCH_OK = 0,
   FLYOLOGY_JSON_RUST_BENCH_INVALID_ARGUMENT = 1,
   FLYOLOGY_JSON_RUST_BENCH_PARSE_ERROR = 2,
-  FLYOLOGY_JSON_RUST_BENCH_PANIC = 3
+  FLYOLOGY_JSON_RUST_BENCH_PANIC = 3,
+  FLYOLOGY_JSON_RUST_BENCH_WRITE_ERROR = 4
 };
 
 /* Each function handles one complete document per call. On success it writes
@@ -55,6 +56,33 @@ int flyology_json_bench_simd_json_traverse(const uint8_t *input,
                                            size_t length,
                                            uint64_t *checksum,
                                            size_t *items);
+
+/* Writer preparation owns a crate DOM behind an opaque context until the
+ * matching release call. Preparation does not publish a context on failure.
+ * Write calls borrow that context for the call, allocate and serialize a
+ * complete output, observe every byte, then release the output allocation.
+ * Check calls additionally compare that output byte-for-byte. All input and
+ * output pointer ranges must remain valid for the duration of their call. */
+int flyology_json_bench_serde_json_prepare_write(const uint8_t *input,
+                                                  size_t length,
+                                                  void **context);
+int flyology_json_bench_sonic_rs_prepare_write(const uint8_t *input,
+                                                size_t length,
+                                                void **context);
+int flyology_json_bench_serde_json_write(const void *context,
+                                          uint64_t *checksum,
+                                          size_t *output_length);
+int flyology_json_bench_sonic_rs_write(const void *context,
+                                        uint64_t *checksum,
+                                        size_t *output_length);
+int flyology_json_bench_serde_json_check_write(
+    const void *context, const uint8_t *expected, size_t expected_length,
+    uint64_t *checksum, size_t *output_length, int *matches);
+int flyology_json_bench_sonic_rs_check_write(
+    const void *context, const uint8_t *expected, size_t expected_length,
+    uint64_t *checksum, size_t *output_length, int *matches);
+int flyology_json_bench_serde_json_release_write(void *context);
+int flyology_json_bench_sonic_rs_release_write(void *context);
 
 #ifdef __cplusplus
 }

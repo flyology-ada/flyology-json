@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Yurii Rashkovskii
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::slice;
 
@@ -12,6 +13,7 @@ const STATUS_OK: i32 = 0;
 const STATUS_INVALID_ARGUMENT: i32 = 1;
 const STATUS_PARSE_ERROR: i32 = 2;
 const STATUS_PANIC: i32 = 3;
+const STATUS_WRITE_ERROR: i32 = 4;
 
 #[derive(Clone, Copy, Default)]
 struct Observation {
@@ -165,6 +167,193 @@ fn run(operation: impl FnOnce() -> Result<Observation, i32>) -> Result<Observati
         Err(_) => Err(STATUS_PANIC),
     }
 }
+
+fn output_observation(output: &[u8]) -> Observation {
+    let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in output {
+        checksum = (checksum ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    Observation {
+        checksum,
+        items: output.len(),
+    }
+}
+
+unsafe fn publish_context<T>(value: T, context: *mut *mut c_void) -> i32 {
+    if context.is_null() {
+        return STATUS_INVALID_ARGUMENT;
+    }
+    let boxed = Box::new(value);
+    unsafe { *context = Box::into_raw(boxed).cast::<c_void>() };
+    STATUS_OK
+}
+
+unsafe fn write_outputs_are_valid(
+    context: *const c_void,
+    checksum: *mut u64,
+    output_length: *mut usize,
+) -> bool {
+    !context.is_null() && !checksum.is_null() && !output_length.is_null()
+}
+
+unsafe fn publish_write(
+    observation: Observation,
+    checksum: *mut u64,
+    output_length: *mut usize,
+) -> i32 {
+    unsafe {
+        *checksum = observation.checksum;
+        *output_length = observation.items;
+    }
+    STATUS_OK
+}
+
+unsafe fn publish_checked_write(
+    output: &[u8],
+    expected_pointer: *const u8,
+    expected_length: usize,
+    checksum: *mut u64,
+    output_length: *mut usize,
+    matches: *mut i32,
+) -> i32 {
+    if expected_pointer.is_null() || matches.is_null() {
+        return STATUS_INVALID_ARGUMENT;
+    }
+    let expected = unsafe { slice::from_raw_parts(expected_pointer, expected_length) };
+    let observation = output_observation(output);
+    unsafe {
+        *checksum = observation.checksum;
+        *output_length = observation.items;
+        *matches = i32::from(output == expected);
+    }
+    STATUS_OK
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flyology_json_bench_serde_json_prepare_write(
+    input_pointer: *const u8,
+    length: usize,
+    context: *mut *mut c_void,
+) -> i32 {
+    if context.is_null() {
+        return STATUS_INVALID_ARGUMENT;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        let source = unsafe { input(input_pointer, length) }?;
+        let value: serde_json::Value =
+            serde_json::from_slice(source).map_err(|_| STATUS_PARSE_ERROR)?;
+        Ok::<serde_json::Value, i32>(value)
+    })) {
+        Ok(Ok(value)) => unsafe { publish_context(value, context) },
+        Ok(Err(status)) => status,
+        Err(_) => STATUS_PANIC,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flyology_json_bench_sonic_rs_prepare_write(
+    input_pointer: *const u8,
+    length: usize,
+    context: *mut *mut c_void,
+) -> i32 {
+    if context.is_null() {
+        return STATUS_INVALID_ARGUMENT;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        let source = unsafe { input(input_pointer, length) }?;
+        sonic_rs::from_slice::<sonic_rs::Value>(source).map_err(|_| STATUS_PARSE_ERROR)
+    })) {
+        Ok(Ok(value)) => unsafe { publish_context(value, context) },
+        Ok(Err(status)) => status,
+        Err(_) => STATUS_PANIC,
+    }
+}
+
+macro_rules! writer_functions {
+    ($write_name:ident, $check_name:ident, $release_name:ident, $value:ty, $serialize:path) => {
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $write_name(
+            context: *const c_void,
+            checksum: *mut u64,
+            output_length: *mut usize,
+        ) -> i32 {
+            if !unsafe { write_outputs_are_valid(context, checksum, output_length) } {
+                return STATUS_INVALID_ARGUMENT;
+            }
+            match catch_unwind(AssertUnwindSafe(|| {
+                let value = unsafe { &*context.cast::<$value>() };
+                let output = $serialize(value).map_err(|_| STATUS_WRITE_ERROR)?;
+                Ok::<Observation, i32>(output_observation(&output))
+            })) {
+                Ok(Ok(observation)) => unsafe {
+                    publish_write(observation, checksum, output_length)
+                },
+                Ok(Err(status)) => status,
+                Err(_) => STATUS_PANIC,
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $check_name(
+            context: *const c_void,
+            expected_pointer: *const u8,
+            expected_length: usize,
+            checksum: *mut u64,
+            output_length: *mut usize,
+            matches: *mut i32,
+        ) -> i32 {
+            if !unsafe { write_outputs_are_valid(context, checksum, output_length) } {
+                return STATUS_INVALID_ARGUMENT;
+            }
+            match catch_unwind(AssertUnwindSafe(|| {
+                let value = unsafe { &*context.cast::<$value>() };
+                $serialize(value).map_err(|_| STATUS_WRITE_ERROR)
+            })) {
+                Ok(Ok(output)) => unsafe {
+                    publish_checked_write(
+                        &output,
+                        expected_pointer,
+                        expected_length,
+                        checksum,
+                        output_length,
+                        matches,
+                    )
+                },
+                Ok(Err(status)) => status,
+                Err(_) => STATUS_PANIC,
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $release_name(context: *mut c_void) -> i32 {
+            if context.is_null() {
+                return STATUS_OK;
+            }
+            match catch_unwind(AssertUnwindSafe(|| unsafe {
+                drop(Box::from_raw(context.cast::<$value>()));
+            })) {
+                Ok(()) => STATUS_OK,
+                Err(_) => STATUS_PANIC,
+            }
+        }
+    };
+}
+
+writer_functions!(
+    flyology_json_bench_serde_json_write,
+    flyology_json_bench_serde_json_check_write,
+    flyology_json_bench_serde_json_release_write,
+    serde_json::Value,
+    serde_json::to_vec
+);
+
+writer_functions!(
+    flyology_json_bench_sonic_rs_write,
+    flyology_json_bench_sonic_rs_check_write,
+    flyology_json_bench_sonic_rs_release_write,
+    sonic_rs::Value,
+    sonic_rs::to_vec
+);
 
 /// Parses and completely traverses one JSON document with serde_json.
 ///

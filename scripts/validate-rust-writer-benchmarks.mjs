@@ -1,0 +1,53 @@
+#!/usr/bin/env node
+// Copyright (c) 2026 Yurii Rashkovskii
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import fs from "node:fs";
+import { requireReviewedNode } from "../benchmarks/comparison/node-toolchain.mjs";
+import { parseStrictJson } from "../benchmarks/comparison/strict-json.mjs";
+import { rustWriterIdentities } from "../benchmarks/comparison/rust-writer-matrix.mjs";
+
+requireReviewedNode();
+
+if (process.argv.length !== 3) {
+  console.error("usage: node scripts/validate-rust-writer-benchmarks.mjs INPUT.jsonl");
+  process.exit(2);
+}
+const expected = new Set(rustWriterIdentities);
+const input = fs.readFileSync(process.argv[2]);
+if (input.length === 0 || input[input.length - 1] !== 0x0a) {
+  throw new Error("Rust writer JSONL must end with a newline");
+}
+let start = 0;
+let records = 0;
+for (let index = 0; index < input.length; index += 1) {
+  if (input[index] !== 0x0a) continue;
+  let record;
+  try {
+    record = parseStrictJson(input.subarray(start, index));
+  } catch (error) {
+    throw new Error(`invalid JSON on line ${records + 1}: ${error.message}`);
+  }
+  records += 1;
+  start = index + 1;
+  if (typeof record.name !== "string" || !expected.delete(record.name)) {
+    throw new Error(`unexpected or duplicate Rust writer identity on line ${records}`);
+  }
+  if (record.samples !== 50 || !Number.isSafeInteger(record.iterations) || record.iterations < 1) {
+    throw new Error(`invalid Rust writer sampling policy on line ${records}`);
+  }
+  for (const field of ["median_ns", "cv_percent"]) {
+    if (typeof record[field] !== "number" || !Number.isFinite(record[field])) {
+      throw new Error(`invalid ${field} on line ${records}`);
+    }
+  }
+  if (record.median_ns <= 0 || record.cv_percent < 0) {
+    throw new Error(`invalid Rust writer distribution on line ${records}`);
+  }
+}
+
+if (expected.size !== 0) {
+  throw new Error(`missing Rust writer identities: ${[...expected].join(", ")}`);
+}
+
+console.log(`validated ${records} exact Rust writer populations`);

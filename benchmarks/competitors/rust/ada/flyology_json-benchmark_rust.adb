@@ -2,11 +2,12 @@
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
 with Interfaces.C;
-with System;
 
 package body Flyology_JSON.Benchmark_Rust is
 
    use type Interfaces.C.size_t;
+   use type Interfaces.C.int;
+   use type System.Address;
 
    subtype C_Status is Interfaces.C.int;
    subtype C_Size is Interfaces.C.size_t;
@@ -54,6 +55,40 @@ package body Flyology_JSON.Benchmark_Rust is
    with Import,
         Convention    => C,
         External_Name => "flyology_json_bench_simd_json_traverse";
+
+   function Serde_JSON_Prepare_Write
+     (Input : System.Address; Length : C_Size; Context : access System.Address) return C_Status
+   with Import, Convention => C,
+        External_Name => "flyology_json_bench_serde_json_prepare_write";
+   function Sonic_RS_Prepare_Write
+     (Input : System.Address; Length : C_Size; Context : access System.Address) return C_Status
+   with Import, Convention => C,
+        External_Name => "flyology_json_bench_sonic_rs_prepare_write";
+
+   function Serde_JSON_Write
+     (Context : System.Address; Checksum : access U64; Length : access C_Size) return C_Status
+   with Import, Convention => C, External_Name => "flyology_json_bench_serde_json_write";
+   function Sonic_RS_Write
+     (Context : System.Address; Checksum : access U64; Length : access C_Size) return C_Status
+   with Import, Convention => C, External_Name => "flyology_json_bench_sonic_rs_write";
+
+   function Serde_JSON_Check_Write
+     (Context : System.Address; Expected : System.Address; Expected_Length : C_Size;
+      Checksum : access U64; Length : access C_Size; Matches : access C_Status) return C_Status
+   with Import, Convention => C,
+        External_Name => "flyology_json_bench_serde_json_check_write";
+   function Sonic_RS_Check_Write
+     (Context : System.Address; Expected : System.Address; Expected_Length : C_Size;
+      Checksum : access U64; Length : access C_Size; Matches : access C_Status) return C_Status
+   with Import, Convention => C,
+        External_Name => "flyology_json_bench_sonic_rs_check_write";
+
+   function Serde_JSON_Release_Write (Context : System.Address) return C_Status
+   with Import, Convention => C,
+        External_Name => "flyology_json_bench_serde_json_release_write";
+   function Sonic_RS_Release_Write (Context : System.Address) return C_Status
+   with Import, Convention => C,
+        External_Name => "flyology_json_bench_sonic_rs_release_write";
 
    function To_Status (Value : C_Status) return Parse_Status is
      (case Value is
@@ -107,5 +142,129 @@ package body Flyology_JSON.Benchmark_Rust is
             Items    => Ada.Streams.Stream_Element_Count (Foreign_Items));
       end if;
    end Parse;
+
+   function Is_Prepared (Context : Prepared_Document) return Boolean is
+     (Context.Handle /= System.Null_Address);
+
+   function To_Write_Status (Value : C_Status) return Write_Status is
+     (case Value is
+         when 0      => Write_Succeeded,
+         when 1      => Write_Invalid_Argument,
+         when 2      => Write_Parse_Error,
+         when 3      => Write_Foreign_Panic,
+         when 4      => Write_Error,
+         when others => Write_Unknown_Foreign_Status);
+
+   procedure Set_Write_Result
+     (Status : C_Status; Checksum : U64; Length : C_Size; Result : out Write_Observation) is
+   begin
+      if Length > C_Size (Ada.Streams.Stream_Element_Count'Last) then
+         Result := (Status => Write_Unknown_Foreign_Status, Checksum => 0, Output_Octets => 0);
+      else
+         Result :=
+           (Status        => To_Write_Status (Status),
+            Checksum      => Checksum,
+            Output_Octets => Ada.Streams.Stream_Element_Count (Length));
+      end if;
+   end Set_Write_Result;
+
+   procedure Release (Context : in out Prepared_Document) is
+      Handle : constant System.Address := Context.Handle;
+      Ignored : C_Status;
+   begin
+      if Handle /= System.Null_Address then
+         Context.Handle := System.Null_Address;
+         case Context.Using is
+            when Serde_JSON => Ignored := Serde_JSON_Release_Write (Handle);
+            when Sonic_RS   => Ignored := Sonic_RS_Release_Write (Handle);
+            when SIMD_JSON  => null;
+         end case;
+      end if;
+   end Release;
+
+   procedure Prepare_Write
+     (Using  : Implementation;
+      Data   : Ada.Streams.Stream_Element_Array;
+      Context : in out Prepared_Document;
+      Result : out Write_Observation)
+   is
+      Status : C_Status;
+      Handle : aliased System.Address := System.Null_Address;
+      Data_Address : constant System.Address :=
+        (if Data'Length = 0 then System.Null_Address else Data (Data'First)'Address);
+   begin
+      Release (Context);
+      if Using = SIMD_JSON then
+         Result := (Status => Write_Unsupported, Checksum => 0, Output_Octets => 0);
+         return;
+      end if;
+      Status :=
+        (case Using is
+            when Serde_JSON =>
+              Serde_JSON_Prepare_Write (Data_Address, C_Size (Data'Length), Handle'Access),
+            when Sonic_RS =>
+              Sonic_RS_Prepare_Write (Data_Address, C_Size (Data'Length), Handle'Access),
+            when SIMD_JSON => 1);
+      Set_Write_Result (Status, 0, 0, Result);
+      if Status = 0 and then Handle = System.Null_Address then
+         Result := (Status => Write_Unknown_Foreign_Status, Checksum => 0, Output_Octets => 0);
+      elsif Status = 0 then
+         Context.Using := Using;
+         Context.Handle := Handle;
+      end if;
+   end Prepare_Write;
+
+   procedure Write
+     (Context : Prepared_Document;
+      Result  : out Write_Observation)
+   is
+      Checksum : aliased U64 := 0;
+      Length   : aliased C_Size := 0;
+      Status   : C_Status;
+   begin
+      if not Is_Prepared (Context) then
+         Result := (Status => Write_Invalid_Argument, Checksum => 0, Output_Octets => 0);
+         return;
+      end if;
+      Status :=
+        (case Context.Using is
+            when Serde_JSON => Serde_JSON_Write (Context.Handle, Checksum'Access, Length'Access),
+            when Sonic_RS => Sonic_RS_Write (Context.Handle, Checksum'Access, Length'Access),
+            when SIMD_JSON => 1);
+      Set_Write_Result (Status, Checksum, Length, Result);
+   end Write;
+
+   procedure Check_Write_Output
+     (Context  : Prepared_Document;
+      Expected : Ada.Streams.Stream_Element_Array;
+      Result   : out Write_Observation;
+      Matches  : out Boolean)
+   is
+      Checksum : aliased U64 := 0;
+      Length   : aliased C_Size := 0;
+      Match    : aliased C_Status := 0;
+      Status   : C_Status;
+      Expected_Address : constant System.Address :=
+        (if Expected'Length = 0 then System.Null_Address else Expected (Expected'First)'Address);
+   begin
+      if not Is_Prepared (Context) then
+         Result := (Status => Write_Invalid_Argument, Checksum => 0, Output_Octets => 0);
+         Matches := False;
+         return;
+      end if;
+      Status :=
+        (case Context.Using is
+            when Serde_JSON =>
+              Serde_JSON_Check_Write
+                (Context.Handle, Expected_Address, C_Size (Expected'Length),
+                 Checksum'Access, Length'Access, Match'Access),
+            when Sonic_RS =>
+              Sonic_RS_Check_Write
+                (Context.Handle, Expected_Address, C_Size (Expected'Length),
+                 Checksum'Access, Length'Access, Match'Access),
+            when SIMD_JSON => 1);
+      Set_Write_Result (Status, Checksum, Length, Result);
+      Matches := Status = 0 and then Match = 1;
+   end Check_Write_Output;
 
 end Flyology_JSON.Benchmark_Rust;

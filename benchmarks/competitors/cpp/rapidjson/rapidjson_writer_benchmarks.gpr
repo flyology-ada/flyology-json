@@ -1,0 +1,61 @@
+with "flyology_bench";
+with "../../../config/flyology_json_parser_benchmarks_config.gpr";
+
+project RapidJSON_Writer_Benchmarks is
+
+   type Tuning_Kind is ("portable", "native");
+   Tuning : Tuning_Kind :=
+     external ("FLYOLOGY_JSON_BENCH_TUNING", "portable");
+   Native_CPU_Switch :=
+     external ("FLYOLOGY_JSON_BENCH_NATIVE_SWITCH", "-march=native");
+   Native_Switches := ();
+
+   case Tuning is
+      when "portable" =>
+         Native_Switches := ();
+      when "native" =>
+         Native_Switches := (Native_CPU_Switch);
+   end case;
+
+   for Languages use ("Ada", "C++");
+   for Source_Dirs use
+     ("../../../../src", "../ada", "ada", "src", "upstream/include", "bench");
+   for Main use ("flyology_json-benchmark_rapidjson_writer_benchmark.adb");
+   for Object_Dir use "writer_obj/" & Tuning;
+   for Exec_Dir use "writer_bin/" & Tuning;
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Flyology_JSON_Parser_Benchmarks_Config.Ada_Compiler_Switches &
+        ("-gnat2022", "-gnatwa", "-gnatwJ", "-gnatyM110") &
+        Native_Switches;
+      for Default_Switches ("C++") use
+        ("-std=c++17",
+         "-Wall",
+         "-Wextra",
+         "-Werror",
+         "-O3",
+         "-DNDEBUG",
+         "-I" & Project'Project_Dir & "../include",
+         "-I" & Project'Project_Dir & "upstream/include") & Native_Switches;
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Linker is
+      for Default_Switches ("Ada") use ("-lstdc++");
+   end Linker;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Kind ("Ada") use "spaces";
+      for Indentation_Continuation ("Ada") use "2";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
+
+end RapidJSON_Writer_Benchmarks;

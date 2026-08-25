@@ -62,7 +62,11 @@ This is a useful preconstructed-DOM serialization bound, never a ranking
 against Flyology's event-driven `write_stream` lane. Flyology's full output
 checksum is outside timing, while yyjson's is inside timing.
 
-RapidJSON is template-based C++, and Rust serializers have Rust ABIs, so their
-future coarse fixed-signature boundaries require benchmark-only shims. Those
-shims must consume the same logical fixture, verify the selected output policy,
-and disclose allocation and setup work before results are compared.
+The benchmark-only Rust static library now exposes the same preconstructed-DOM
+comparison for serde_json and sonic-rs through coarse fixed-signature C ABI
+calls. Their `Value` construction remains outside timing; each timed `to_vec`
+call includes complete-output allocation, serialization, FNV-1a observation,
+and drop. Exact-output preflight and a four-population validator cover both
+shared fixtures and both serializers. simd-json remains parser-only because no
+additional maintained serializer boundary was admitted. RapidJSON's analogous
+template-based C++ lane is separately labelled and documented by its adapter.

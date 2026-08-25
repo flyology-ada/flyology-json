@@ -3,6 +3,7 @@
 
 with Ada.Streams;
 with Interfaces;
+with System;
 
 package Flyology_JSON.Benchmark_Rust is
 
@@ -25,5 +26,48 @@ package Flyology_JSON.Benchmark_Rust is
      (Using  : Implementation;
       Data   : Ada.Streams.Stream_Element_Array;
       Result : out Observation);
+
+   type Write_Status is
+     (Write_Succeeded,
+      Write_Invalid_Argument,
+      Write_Parse_Error,
+      Write_Foreign_Panic,
+      Write_Error,
+      Write_Unsupported,
+      Write_Unknown_Foreign_Status);
+
+   type Write_Observation is record
+      Status        : Write_Status;
+      Checksum      : Interfaces.Unsigned_64;
+      Output_Octets : Ada.Streams.Stream_Element_Count;
+   end record;
+
+   type Prepared_Document is limited private;
+
+   procedure Prepare_Write
+     (Using  : Implementation;
+      Data   : Ada.Streams.Stream_Element_Array;
+      Context : in out Prepared_Document;
+      Result : out Write_Observation);
+
+   procedure Write
+     (Context : Prepared_Document;
+      Result  : out Write_Observation);
+
+   procedure Check_Write_Output
+     (Context  : Prepared_Document;
+      Expected : Ada.Streams.Stream_Element_Array;
+      Result   : out Write_Observation;
+      Matches  : out Boolean);
+
+   procedure Release (Context : in out Prepared_Document);
+
+   function Is_Prepared (Context : Prepared_Document) return Boolean;
+
+private
+   type Prepared_Document is limited record
+      Using  : Implementation := Serde_JSON;
+      Handle : System.Address := System.Null_Address;
+   end record;
 
 end Flyology_JSON.Benchmark_Rust;

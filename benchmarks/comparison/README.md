@@ -93,6 +93,14 @@ among implementations configured for the same escaping and number-spelling
 policy. Otherwise the harness validates the output and records the difference
 under a distinct output policy; unlike policies are not ranked together.
 
+The maintained preconstructed-DOM writer comparison uses the same
+`large_raw_string` and `nested_structures` output bytes for yyjson, RapidJSON,
+serde_json, and sonic-rs. DOM construction is outside timing. Each timed call
+includes the implementation's ordinary compact serialization, output-buffer
+allocation and cleanup, and a full-output checksum. Exact byte equality is a
+mandatory preflight, and these results remain separate from Flyology's
+`write_stream` lane.
+
 ## Build tracks
 
 Each admitted implementation is built separately in both tracks when the

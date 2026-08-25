@@ -83,13 +83,15 @@
     },
     {
       "lane": "write_dom",
-      "supported": false,
-      "api": "",
-      "profile_ids": [],
-      "output_policy_ids": [],
-      "observable_result": "",
+      "supported": true,
+      "api": "sonic_rs::to_vec(&Value)",
+      "profile_ids": ["sonic-rs-value-default"],
+      "output_policy_ids": ["sonic-rs-to-vec-default"],
+      "observable_result": "Exact output byte count plus FNV-1a over every output byte before the Vec is dropped.",
       "limitations": [
-        "Writer adapter is deferred."
+        "The reusable Value is prepared outside timing; serialization, one complete output allocation, hashing, and drop are timed.",
+        "Converted numbers need not preserve source lexemes; exact-output preflight admits only matching fixtures.",
+        "Allocator exhaustion may abort the process and is not represented as the ordinary write-error status."
       ]
     },
     {
@@ -126,7 +128,21 @@
       ]
     }
   ],
-  "output_policies": [],
+  "output_policies": [
+    {
+      "output_policy_id": "sonic-rs-to-vec-default",
+      "encoding": "UTF-8",
+      "bom": "none",
+      "whitespace": "compact with no added whitespace",
+      "member_order": "preserve sonic-rs Value object iteration order",
+      "number_spelling": "render converted sonic-rs numeric values; exact source lexemes are not guaranteed",
+      "non_ascii": "emit valid UTF-8 directly",
+      "solidus": "unescaped",
+      "control_escaping": "sonic-rs default compact escaping",
+      "final_suffix": "none",
+      "canonical": false
+    }
+  ],
   "memory": {
     "input_access": "read_only",
     "required_readable_padding_octets": 0,

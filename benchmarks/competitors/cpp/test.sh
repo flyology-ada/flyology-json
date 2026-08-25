@@ -50,9 +50,23 @@ esac
     env FLYOLOGY_JSON_BENCH_TUNING="$tuning" \
         FLYOLOGY_JSON_BENCH_NATIVE_SWITCH="${cpu_switch:--march=native}" \
         alr exec -- gprbuild -f -p -P competitors/cpp/cpp_adapter_tests.gpr
+    env FLYOLOGY_JSON_BENCH_TUNING="$tuning" \
+        FLYOLOGY_JSON_BENCH_NATIVE_SWITCH="${cpu_switch:--march=native}" \
+        alr exec -- gprbuild -f -p \
+          -P competitors/cpp/rapidjson/rapidjson_writer_benchmarks.gpr
 )
 
 "$root/bin/$tuning/flyology_json-benchmark_cpp_tests"
+FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
+  "$root/rapidjson/writer_bin/$tuning/flyology_json-benchmark_rapidjson_writer_benchmark"
+if FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
+   FLYOLOGY_JSON_BENCH_FIXTURE=not-a-fixture \
+     "$root/rapidjson/writer_bin/$tuning/flyology_json-benchmark_rapidjson_writer_benchmark" \
+     >/dev/null 2>&1
+then
+    echo "RapidJSON writer accepted an unknown fixture selector" >&2
+    exit 1
+fi
 "$root/check-symbols.sh" "$tuning"
 
 build="$root/build/$tuning"

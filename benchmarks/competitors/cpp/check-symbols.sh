@@ -36,8 +36,12 @@ nm -g "$executable" \
     | LC_ALL=C sort -u >"$temporary/actual"
 
 cat >"$temporary/expected" <<'SYMBOLS'
+flyology_json_bench_rapidjson_check_write
 flyology_json_bench_rapidjson_dom
 flyology_json_bench_rapidjson_events
+flyology_json_bench_rapidjson_prepare_write
+flyology_json_bench_rapidjson_release_write
+flyology_json_bench_rapidjson_write_dom
 flyology_json_bench_simdjson_dom
 flyology_json_bench_simdjson_padding
 SYMBOLS

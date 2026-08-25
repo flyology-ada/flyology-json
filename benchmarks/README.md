@@ -157,6 +157,13 @@ verbose GPR build log, and an artifact-wide SHA-256 manifest. GitHub-hosted
 runner measurements are always classified as `directional`; they are not a
 formal regression scorecard.
 
+The weekly artifact also retains separate two-fixture `write_dom`
+distributions for yyjson, RapidJSON, serde_json, and sonic-rs alongside the
+Flyology `write_stream` matrix. Every DOM lane prepares its reusable value tree
+outside timing, allocates and destroys its ordinary output representation per
+timed operation, hashes every output byte, and passes an exact-output preflight.
+The two lane kinds remain separate populations.
+
 The parser matrix fixes semantic fixture, chunk, event, call, public `Drain`
 event-capacity, and caller event-array byte identities. The standalone public
 lane uses 256 events (6,144 caller bytes on the reviewed 64-bit targets); a

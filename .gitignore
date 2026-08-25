@@ -5,6 +5,8 @@
 **/alire/
 **/config/
 **/bin/
+**/writer_bin/
+**/writer_obj/
 **/node_modules/
 /benchmarks/competitors/rust/target/
 /benchmarks/comparison_bin/

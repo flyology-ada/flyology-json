@@ -36,6 +36,8 @@ esac
 comparison_executable="$project_root/benchmarks/comparison_bin/$track/flyology_json-comparison_benchmark"
 writer_executable="$project_root/benchmarks/writer_bin/$track/flyology_json-writer_benchmark"
 yyjson_writer_executable="$project_root/benchmarks/competitors/yyjson/writer_bin/$track/flyology_json-benchmark_yyjson_writer_benchmark"
+rapidjson_writer_executable="$project_root/benchmarks/competitors/cpp/rapidjson/writer_bin/$track/flyology_json-benchmark_rapidjson_writer_benchmark"
+rust_writer_executable="$project_root/benchmarks/competitors/rust/writer_bin/$track/flyology_json-benchmark_rust_writer_benchmark"
 
 mkdir -p "$output_directory/provenance/adapters"
 mkdir -p "$output_directory/provenance/build"
@@ -124,6 +126,49 @@ esac
       "$yyjson_writer_executable" \
       >>"$output_directory/yyjson-writer.jsonl"
   done
+
+  if ! FLYOLOGY_JSON_BENCH_TUNING="$track" \
+       FLYOLOGY_JSON_BENCH_NATIVE_SWITCH="$native_switch" \
+       alr exec -- gprbuild -f -p -v \
+         -P competitors/cpp/rapidjson/rapidjson_writer_benchmarks.gpr \
+         >"$output_directory/rapidjson-writer-build.log" 2>&1
+  then
+    cat "$output_directory/rapidjson-writer-build.log" >&2
+    exit 1
+  fi
+  cat "$output_directory/rapidjson-writer-build.log"
+  : >"$output_directory/rapidjson-writer.jsonl"
+  for writer_fixture in large_raw_string nested_structures
+  do
+    FLYOLOGY_JSON_BENCH_OUTPUT=json \
+      FLYOLOGY_JSON_BENCH_FIXTURE="$writer_fixture" \
+      "$rapidjson_writer_executable" \
+      >>"$output_directory/rapidjson-writer.jsonl"
+  done
+
+  if ! FLYOLOGY_JSON_BENCH_TUNING="$track" \
+       FLYOLOGY_JSON_BENCH_NATIVE_SWITCH="$native_switch" \
+       FLYOLOGY_JSON_BENCH_SYSTEM_LIBRARIES="$system_libraries" \
+       RUST_ADAPTER_DIR="$PWD/competitors/rust/target/$track/release" \
+       alr exec -- gprbuild -f -p -v \
+         -P competitors/rust/rust_writer_benchmarks.gpr \
+         >"$output_directory/rust-writer-build.log" 2>&1
+  then
+    cat "$output_directory/rust-writer-build.log" >&2
+    exit 1
+  fi
+  cat "$output_directory/rust-writer-build.log"
+  : >"$output_directory/rust-writer.jsonl"
+  for rust_implementation in serde_json sonic-rs
+  do
+    for writer_fixture in large_raw_string nested_structures
+    do
+      FLYOLOGY_JSON_BENCH_OUTPUT=json \
+        FLYOLOGY_JSON_BENCH_IMPLEMENTATION="$rust_implementation" \
+        FLYOLOGY_JSON_BENCH_FIXTURE="$writer_fixture" \
+        "$rust_writer_executable" >>"$output_directory/rust-writer.jsonl"
+    done
+  done
 )
 
 node "$project_root/scripts/validate-parser-benchmarks.mjs" \
@@ -134,6 +179,10 @@ node "$project_root/scripts/validate-writer-benchmarks.mjs" \
 
 node "$project_root/scripts/validate-yyjson-writer-benchmarks.mjs" \
   "$output_directory/yyjson-writer.jsonl"
+node "$project_root/scripts/validate-rapidjson-writer-benchmarks.mjs" \
+  "$output_directory/rapidjson-writer.jsonl"
+node "$project_root/scripts/validate-rust-writer-benchmarks.mjs" \
+  "$output_directory/rust-writer.jsonl"
 
 node "$project_root/scripts/summarize-comparison-benchmarks.mjs" \
   "$track" "$output_directory/comparison-summary.jsonl" \
@@ -255,6 +304,10 @@ cp "$project_root/benchmarks/comparison/parser-matrix.mjs" \
   "$output_directory/provenance/"
 cp "$project_root/benchmarks/comparison/yyjson-writer-matrix.mjs" \
   "$output_directory/provenance/"
+cp "$project_root/benchmarks/comparison/rapidjson-writer-matrix.mjs" \
+  "$output_directory/provenance/"
+cp "$project_root/benchmarks/comparison/rust-writer-matrix.mjs" \
+  "$output_directory/provenance/"
 cp "$project_root/benchmarks/comparison/comparison-matrix.mjs" \
   "$output_directory/provenance/"
 cp "$project_root/scripts/summarize-comparison-benchmarks.mjs" \
@@ -264,6 +317,10 @@ cp "$project_root/scripts/validate-parser-benchmarks.mjs" \
 cp "$project_root/scripts/validate-writer-benchmarks.mjs" \
   "$output_directory/provenance/"
 cp "$project_root/scripts/validate-yyjson-writer-benchmarks.mjs" \
+  "$output_directory/provenance/"
+cp "$project_root/scripts/validate-rapidjson-writer-benchmarks.mjs" \
+  "$output_directory/provenance/"
+cp "$project_root/scripts/validate-rust-writer-benchmarks.mjs" \
   "$output_directory/provenance/"
 cp "$project_root/scripts/validate-parser-preflight.mjs" \
   "$output_directory/provenance/"
@@ -285,16 +342,46 @@ cp "$comparison_executable" \
   "$output_directory/provenance/build/"
 cp "$yyjson_writer_executable" \
   "$output_directory/provenance/build/"
+cp "$rapidjson_writer_executable" \
+  "$output_directory/provenance/build/"
+cp "$rust_writer_executable" \
+  "$output_directory/provenance/build/"
 cp "$project_root/benchmarks/competitors/rust/target/$track/release/libflyology_json_rust_bench_adapters.a" \
   "$output_directory/provenance/build/"
 cp "$project_root/benchmarks/competitors/cpp/include/flyology_json_cpp_bench_adapters.h" \
   "$output_directory/provenance/adapters/"
+cp "$project_root/benchmarks/competitors/cpp/ada/flyology_json-benchmark_cpp.ads" \
+  "$output_directory/provenance/adapters/"
+cp "$project_root/benchmarks/competitors/cpp/ada/flyology_json-benchmark_cpp.adb" \
+  "$output_directory/provenance/adapters/"
 cp "$project_root/benchmarks/competitors/cpp/rapidjson/src/rapidjson_adapter.cpp" \
+  "$output_directory/provenance/adapters/"
+cp "$project_root/benchmarks/competitors/cpp/rapidjson/ada/flyology_json-benchmark_cpp-rapidjson.ads" \
+  "$output_directory/provenance/adapters/"
+cp "$project_root/benchmarks/competitors/cpp/rapidjson/ada/flyology_json-benchmark_cpp-rapidjson.adb" \
+  "$output_directory/provenance/adapters/"
+cp "$project_root/benchmarks/competitors/cpp/rapidjson/rapidjson_writer_benchmarks.gpr" \
+  "$output_directory/provenance/"
+cp "$project_root/benchmarks/competitors/cpp/rapidjson/bench/flyology_json-benchmark_rapidjson_writer_benchmark.ads" \
+  "$output_directory/provenance/adapters/"
+cp "$project_root/benchmarks/competitors/cpp/rapidjson/bench/flyology_json-benchmark_rapidjson_writer_benchmark.adb" \
   "$output_directory/provenance/adapters/"
 cp "$project_root/benchmarks/competitors/cpp/simdjson/src/simdjson_adapter.cpp" \
   "$output_directory/provenance/adapters/"
 cp "$project_root/benchmarks/competitors/rust/src/lib.rs" \
   "$output_directory/provenance/adapters/rust-lib.rs"
+cp "$project_root/benchmarks/competitors/rust/include/flyology_json_rust_bench_adapters.h" \
+  "$output_directory/provenance/adapters/"
+cp "$project_root/benchmarks/competitors/rust/ada/flyology_json-benchmark_rust.ads" \
+  "$output_directory/provenance/adapters/"
+cp "$project_root/benchmarks/competitors/rust/ada/flyology_json-benchmark_rust.adb" \
+  "$output_directory/provenance/adapters/"
+cp "$project_root/benchmarks/competitors/rust/rust_writer_benchmarks.gpr" \
+  "$output_directory/provenance/"
+cp "$project_root/benchmarks/competitors/rust/bench/flyology_json-benchmark_rust_writer_benchmark.ads" \
+  "$output_directory/provenance/adapters/"
+cp "$project_root/benchmarks/competitors/rust/bench/flyology_json-benchmark_rust_writer_benchmark.adb" \
+  "$output_directory/provenance/adapters/"
 cp "$project_root/benchmarks/competitors/yyjson/src/flyology_json-benchmark_yyjson.ads" \
   "$output_directory/provenance/adapters/"
 cp "$project_root/benchmarks/competitors/yyjson/src/flyology_json-benchmark_yyjson.adb" \

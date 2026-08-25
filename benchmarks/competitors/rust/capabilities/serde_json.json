@@ -83,13 +83,15 @@
     },
     {
       "lane": "write_dom",
-      "supported": false,
-      "api": "",
-      "profile_ids": [],
-      "output_policy_ids": [],
-      "observable_result": "",
+      "supported": true,
+      "api": "serde_json::to_vec(&Value)",
+      "profile_ids": ["serde_json-value-default"],
+      "output_policy_ids": ["serde-json-to-vec-default"],
+      "observable_result": "Exact output byte count plus FNV-1a over every output byte before the Vec is dropped.",
       "limitations": [
-        "Writer adapter is deferred."
+        "The reusable Value is prepared outside timing; serialization, one complete output allocation, hashing, and drop are timed.",
+        "Converted numbers need not preserve source lexemes; exact-output preflight admits only matching fixtures.",
+        "Allocator exhaustion may abort the process and is not represented as the ordinary write-error status."
       ]
     },
     {
@@ -125,7 +127,21 @@
       ]
     }
   ],
-  "output_policies": [],
+  "output_policies": [
+    {
+      "output_policy_id": "serde-json-to-vec-default",
+      "encoding": "UTF-8",
+      "bom": "none",
+      "whitespace": "compact with no added whitespace",
+      "member_order": "serde_json Value map iteration order",
+      "number_spelling": "render converted serde_json Number values; exact source lexemes are not guaranteed",
+      "non_ascii": "emit valid UTF-8 directly",
+      "solidus": "unescaped",
+      "control_escaping": "serde_json default compact escaping",
+      "final_suffix": "none",
+      "canonical": false
+    }
+  ],
   "memory": {
     "input_access": "read_only",
     "required_readable_padding_octets": 0,

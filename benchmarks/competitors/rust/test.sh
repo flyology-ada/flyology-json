@@ -91,6 +91,7 @@ run_cargo test --release --locked --verbose
 
 case "$(uname -s)" in
   Linux)
+    system_libraries='-ldl -lpthread -lm'
     cc -std=c11 -Wall -Wextra -Werror \
       -Iinclude \
       tests/abi_smoke.c \
@@ -99,6 +100,7 @@ case "$(uname -s)" in
       -o "$target_dir/release/rust-bench-abi-smoke"
     ;;
   Darwin)
+    system_libraries=
     cc -std=c11 -Wall -Wextra -Werror \
       -Iinclude \
       tests/abi_smoke.c \
@@ -120,3 +122,15 @@ esac
 )
 
 "$script_dir/target/ada_bin/flyology_json-benchmark_rust_tests"
+
+(
+  cd ../..
+  env FLYOLOGY_JSON_BENCH_TUNING="$tuning" \
+    FLYOLOGY_JSON_BENCH_SYSTEM_LIBRARIES="$system_libraries" \
+    RUST_ADAPTER_DIR="$target_dir/release" \
+    alr exec -- gprbuild -f -p -P competitors/rust/rust_writer_benchmarks.gpr
+  env FLYOLOGY_JSON_BENCH_PREFLIGHT_ONLY=true \
+    FLYOLOGY_JSON_BENCH_IMPLEMENTATION= \
+    FLYOLOGY_JSON_BENCH_FIXTURE= \
+    competitors/rust/writer_bin/"$tuning"/flyology_json-benchmark_rust_writer_benchmark
+)
