@@ -1,6 +1,7 @@
 with Ada.Streams;
 with Flyology_JSON.Parser_Core;
 with Interfaces;
+with System;
 
 procedure Flyology_JSON.Parser_Core_Tests is
 
@@ -9,6 +10,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
    use type Ada.Streams.Stream_Element_Count;
    use type Ada.Streams.Stream_Element;
    use type Core.Byte_Offset;
+   use type Core.Buffered_Slice_Status;
    use type Core.Chunk_Range;
    use type Core.Decoded_Fragment_Kind;
    use type Core.Diagnostic;
@@ -272,6 +274,77 @@ procedure Flyology_JSON.Parser_Core_Tests is
 
       return Left.Kind /= Core.Boolean_Value or else Left.Boolean_Data = Right.Boolean_Data;
    end Equivalent_Event;
+
+   procedure Check_Buffered_Event
+     (Buffered_Item : Core.Buffered_Event;
+      Plain_Item    : Core.Event;
+      Input_First   : Core.Byte_Offset;
+      Input_Length  : Count)
+   is
+      Slice  : Core.Chunk_Range;
+      Status : Core.Buffered_Slice_Status;
+   begin
+      Check (Core.Buffered_Kind (Buffered_Item) = Plain_Item.Kind, "buffered drain event kind changed");
+      Check (Core.Buffered_Source (Buffered_Item) = Plain_Item.Source, "buffered drain source range changed");
+      Check
+        (Core.Buffered_Has_Raw_Slice (Buffered_Item) = Plain_Item.Has_Raw_Slice,
+         "buffered drain raw presence changed");
+      Check
+        (Core.Buffered_Decoded_Kind (Buffered_Item) = Plain_Item.Decoded_Kind,
+         "buffered drain decoded kind changed");
+
+      Core.Resolve_Buffered_Raw_Range (Buffered_Item, Input_First, Input_Length, Slice, Status);
+      if Plain_Item.Has_Raw_Slice then
+         Check (Status = Core.Slice_Resolved, "buffered raw slice did not resolve in its producing window");
+         Check (Slice = Plain_Item.Raw_Slice, "buffered raw slice changed");
+
+         Core.Resolve_Buffered_Raw_Range
+           (Buffered_Item,
+            Plain_Item.Source.First + Plain_Item.Source.Octet_Length,
+            0,
+            Slice,
+            Status);
+         Check (Status = Core.Range_Outside_Window, "outside buffered raw coordinates were accepted");
+         Check (Slice = (First_Count => 0, Octet_Length => 0), "stale buffered resolution returned a range");
+
+         Core.Resolve_Buffered_Raw_Range (Buffered_Item, Input_First, 0, Slice, Status);
+         Check (Status = Core.Range_Outside_Window, "short buffered raw window was accepted");
+         Check (Slice = (First_Count => 0, Octet_Length => 0), "short buffered window returned a range");
+      else
+         Check (Status = Core.No_Raw_Slice, "buffered event without raw source resolved a slice");
+         Check (Slice = (First_Count => 0, Octet_Length => 0), "raw-free buffered event returned a range");
+      end if;
+
+      case Plain_Item.Decoded_Kind is
+         when Core.No_Decoded_Fragment   =>
+            null;
+
+         when Core.Decoded_Is_Raw_Range  =>
+            Check
+              (Core.Buffered_Decoded_Source (Buffered_Item) = Plain_Item.Decoded_Source,
+               "buffered decoded raw source changed");
+
+         when Core.Decoded_Inline_Scalar =>
+            declare
+               Scalar : constant Core.Inline_Scalar := Core.Buffered_Decoded_Scalar (Buffered_Item);
+            begin
+               Check (Core.Buffered_Decoded_Source (Buffered_Item) = Plain_Item.Decoded_Source,
+                      "buffered inline source changed");
+               Check (Scalar.Length = Plain_Item.Decoded.Length, "buffered inline length changed");
+               for Position in 1 .. Scalar.Length loop
+                  Check
+                    (Scalar.Octets (Position) = Plain_Item.Decoded.Octets (Position),
+                     "buffered inline octets changed");
+               end loop;
+            end;
+      end case;
+
+      if Plain_Item.Kind = Core.Boolean_Value then
+         Check
+           (Core.Buffered_Boolean_Data (Buffered_Item) = Plain_Item.Boolean_Data,
+            "buffered Boolean value changed");
+      end if;
+   end Check_Buffered_Event;
 
    procedure Drain
      (Parser      : in out Core.Parser;
@@ -1264,7 +1337,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
             Check (Result.Item.Source = (First => 3, Octet_Length => 1), "denied scalar moved");
             Check (Core.State (Parser) = Core.Failure_Pending, "denial was not latched");
             Check
-              (Core.Terminal_Diagnostic (Parser) = (Code => Core.Name_Storage_Exhausted, Offset => 3),
+              (Core.Terminal_Diagnostic (Parser) = (Code => Core.Name_Storage_Exhausted, Offset => 1),
                "pending denial changed its diagnostic");
          end Reach_Pending;
       begin
@@ -1387,7 +1460,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          1,
          Core.Parse_Failed,
          Core.Name_Storage_Exhausted,
-         2,
+         1,
          Check_Prefix     => True,
          Expected_Raw     => "a",
          Expected_Decoded => "");
@@ -1407,7 +1480,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          1,
          Core.Parse_Failed,
          Core.Name_Storage_Exhausted,
-         8,
+         7,
          Expected_Name_Ends => 1,
          Check_Prefix       => True,
          Expected_Raw       => "a0a",
@@ -1419,7 +1492,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          1,
          Core.Parse_Failed,
          Core.Name_Storage_Exhausted,
-         2,
+         1,
          Check_Prefix     => True,
          Expected_Raw     => E_Acute,
          Expected_Decoded => "");
@@ -1429,7 +1502,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          1,
          Core.Parse_Failed,
          Core.Name_Storage_Exhausted,
-         2,
+         1,
          Check_Prefix     => True,
          Expected_Raw     => Reverse_Solidus & "u20AC",
          Expected_Decoded => "");
@@ -1439,7 +1512,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          1,
          Core.Parse_Failed,
          Core.Name_Storage_Exhausted,
-         2,
+         1,
          Check_Prefix     => True,
          Expected_Raw     => Reverse_Solidus & Quote,
          Expected_Decoded => "");
@@ -1449,7 +1522,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          1,
          Core.Parse_Failed,
          Core.Name_Storage_Exhausted,
-         2,
+         1,
          Check_Prefix     => True,
          Expected_Raw     => Reverse_Solidus & Reverse_Solidus,
          Expected_Decoded => "");
@@ -1459,7 +1532,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          1,
          Core.Parse_Failed,
          Core.Name_Storage_Exhausted,
-         2,
+         1,
          Check_Prefix     => True,
          Expected_Raw     => Grinning_Face,
          Expected_Decoded => "");
@@ -1469,7 +1542,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          1,
          Core.Parse_Failed,
          Core.Name_Storage_Exhausted,
-         2,
+         1,
          Check_Prefix     => True,
          Expected_Raw     => Reverse_Solidus & "uD83D" & Reverse_Solidus & "uDE00",
          Expected_Decoded => "");
@@ -1481,7 +1554,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
          1,
          Core.Parse_Failed,
          Core.Name_Storage_Exhausted,
-         6,
+         1,
          Check_Prefix     => True,
          Expected_Raw     => "abcde",
          Expected_Decoded => "abcd");
@@ -1899,7 +1972,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
             Check (Result.Consumed = 0, "pending failure consumed following input");
             Check (Result.Produced = 0, "pending failure returned a second event");
             Check
-              (Result.Diagnostic = (Code => Core.Name_Storage_Exhausted, Offset => 3),
+              (Result.Diagnostic = (Code => Core.Name_Storage_Exhausted, Offset => 1),
                "pending failure diagnostic changed");
          end;
 
@@ -1915,7 +1988,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
             Check (Result.Produced = 5, "underfull pending failure lost provisional events");
             Check (Core.State (Parser) = Core.Failed, "underfull pending failure was not terminal");
             Check
-              (Result.Diagnostic = (Code => Core.Name_Storage_Exhausted, Offset => 3),
+              (Result.Diagnostic = (Code => Core.Name_Storage_Exhausted, Offset => 1),
                "underfull pending failure changed primary diagnostic");
          end;
       end;
@@ -1928,111 +2001,188 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Capacities : constant Capacity_Array := [1, 2, 3, 4, 7];
       Bounds     : constant Bound_Array := [-23, 19];
 
-      procedure Check_Text (Text : String) is
+      procedure Run_Schedule
+        (Text                : String;
+         Capacity            : Positive;
+         Buffer_First        : Offset;
+         Split               : Natural := 0;
+         Randomized          : Boolean := False;
+         Seed                : Interfaces.Unsigned_32 := 0;
+         Maximum_Depth       : Natural := 8;
+         Name_Octet_Capacity : Natural := Test_Name_Octet_Capacity;
+         Name_Capacity       : Natural := Test_Name_Capacity)
+      is
+         Plain_Parser    : Core.Parser (Maximum_Depth, Name_Octet_Capacity, Name_Capacity);
+         Buffered_Parser : Core.Parser (Maximum_Depth, Name_Octet_Capacity, Name_Capacity);
+         Plain_Events    : Core.Event_Array (Buffer_First .. Buffer_First + Offset (Capacity) - 1);
+         Buffered_Events :
+           Core.Buffered_Event_Array (-Buffer_First .. -Buffer_First + Offset (Capacity) - 1);
+
+         procedure Check_Chunk
+           (Input       : Ada.Streams.Stream_Element_Array;
+            Input_First : Core.Byte_Offset;
+            Final_Input : Boolean;
+            Stop        : out Core.Drain_Stop)
+         is
+            Used            : Count := 0;
+            Plain_Result    : Core.Drain_Result;
+            Buffered_Result : Core.Buffered_Drain_Result;
+         begin
+            loop
+               declare
+                  First       : constant Offset := Input'First + Offset (Used);
+                  Exact_Input : Ada.Streams.Stream_Element_Array renames Input (First .. Input'Last);
+                  Exact_First : constant Core.Byte_Offset := Input_First + Core.Byte_Offset (Used);
+               begin
+                  Core.Drain (Plain_Parser, Exact_Input, Final_Input, Plain_Events, Plain_Result);
+                  Core.Buffered_Drain
+                    (Buffered_Parser, Exact_Input, Final_Input, Buffered_Events, Buffered_Result);
+
+                  Check
+                    (Buffered_Result.Input_First = Exact_First,
+                     "buffered drain lost its exact input origin");
+                  Check (Buffered_Result.Stop = Plain_Result.Stop, "buffered drain stop changed");
+                  Check
+                    (Buffered_Result.Consumed = Plain_Result.Consumed,
+                     "buffered drain consumed count changed");
+                  Check
+                    (Buffered_Result.Produced = Plain_Result.Produced,
+                     "buffered drain produced count changed");
+                  Check
+                    (Buffered_Result.Diagnostic = Plain_Result.Diagnostic,
+                     "buffered drain diagnostic changed");
+                  Check
+                    (Core.State (Buffered_Parser) = Core.State (Plain_Parser),
+                     "buffered drain parser state changed");
+
+                  if Plain_Result.Produced > 0 then
+                     for Position in Count range 0 .. Plain_Result.Produced - 1 loop
+                        declare
+                           Plain_Item : Core.Event renames
+                             Plain_Events (Plain_Events'First + Offset (Position));
+                           Buffered_Item : Core.Buffered_Event renames
+                             Buffered_Events (Buffered_Events'First + Offset (Position));
+                        begin
+                           Check_Buffered_Event
+                             (Buffered_Item,
+                              Plain_Item,
+                              Buffered_Result.Input_First,
+                              Exact_Input'Length);
+                        end;
+                     end loop;
+                  end if;
+               end;
+
+               Used := Used + Plain_Result.Consumed;
+               Stop := Plain_Result.Stop;
+               exit when Stop /= Core.Drain_Buffer_Full;
+            end loop;
+         end Check_Chunk;
+
+         Stop : Core.Drain_Stop := Core.Drain_Need_Input;
       begin
-         for Split in 0 .. Text'Length loop
-            for Capacity of Capacities loop
-               for Buffer_First of Bounds loop
-                  declare
-                     Plain_Parser    : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity);
-                     Buffered_Parser : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity);
-                     Plain_Events    :
-                       Core.Event_Array (Buffer_First .. Buffer_First + Offset (Capacity) - 1);
-                     Buffered_Events :
-                       Core.Buffered_Event_Array (-Buffer_First .. -Buffer_First + Offset (Capacity) - 1);
+         Core.Initialize (Plain_Parser);
+         Core.Initialize (Buffered_Parser);
 
-                     procedure Check_Chunk
-                       (Input       : Ada.Streams.Stream_Element_Array;
-                        Input_First : Core.Byte_Offset;
-                        Final_Input : Boolean;
-                        Stop        : out Core.Drain_Stop)
-                     is
-                        Used            : Count := 0;
-                        Plain_Result    : Core.Drain_Result;
-                        Buffered_Result : Core.Buffered_Drain_Result;
+         if Randomized then
+            declare
+               Generator : Interfaces.Unsigned_32 := Seed;
+               Position  : Natural := 0;
+            begin
+               while Position < Text'Length loop
+                  Generator := Generator * 1_664_525 + 1_013_904_223;
+                  if (Generator and 3) = 0 then
+                     declare
+                        Empty : constant Ada.Streams.Stream_Element_Array :=
+                          To_Input ("", Offset (-41 + Position));
                      begin
-                        loop
-                           declare
-                              First       : constant Offset := Input'First + Offset (Used);
-                              Exact_Input : Ada.Streams.Stream_Element_Array renames
-                                Input (First .. Input'Last);
-                              Exact_First : constant Core.Byte_Offset :=
-                                Input_First + Core.Byte_Offset (Used);
-                           begin
-                              Core.Drain (Plain_Parser, Exact_Input, Final_Input, Plain_Events, Plain_Result);
-                              Core.Buffered_Drain
-                                (Buffered_Parser, Exact_Input, Final_Input, Buffered_Events, Buffered_Result);
+                        Check_Chunk (Empty, Core.Byte_Offset (Position), False, Stop);
+                        exit when Stop /= Core.Drain_Need_Input;
+                     end;
+                  end if;
 
-                              Check
-                                (Buffered_Result.Input_First = Exact_First,
-                                 "buffered drain lost its exact input origin");
-                              Check (Buffered_Result.Stop = Plain_Result.Stop, "buffered drain stop changed");
-                              Check
-                                (Buffered_Result.Consumed = Plain_Result.Consumed,
-                                 "buffered drain consumed count changed");
-                              Check
-                                (Buffered_Result.Produced = Plain_Result.Produced,
-                                 "buffered drain produced count changed");
-                              Check
-                                (Buffered_Result.Diagnostic = Plain_Result.Diagnostic,
-                                 "buffered drain diagnostic changed");
-                              Check
-                                (Core.State (Buffered_Parser) = Core.State (Plain_Parser),
-                                 "buffered drain parser state changed");
-
-                              if Plain_Result.Produced > 0 then
-                                 for Position in Count range 0 .. Plain_Result.Produced - 1 loop
-                                    declare
-                                       Plain_Item    : Core.Event renames
-                                         Plain_Events (Plain_Events'First + Offset (Position));
-                                       Buffered_Item : Core.Buffered_Event renames
-                                         Buffered_Events (Buffered_Events'First + Offset (Position));
-                                    begin
-                                       Check
-                                         (Core.Buffered_Kind (Buffered_Item) = Plain_Item.Kind,
-                                          "buffered drain event kind changed");
-                                       Check
-                                         (Core.Buffered_Source (Buffered_Item) = Plain_Item.Source,
-                                          "buffered drain source range changed");
-                                    end;
-                                 end loop;
-                              end if;
-                           end;
-
-                           Used := Used + Plain_Result.Consumed;
-                           Stop := Plain_Result.Stop;
-                           exit when Stop /= Core.Drain_Buffer_Full;
-                        end loop;
-                     end Check_Chunk;
-
-                     Stop : Core.Drain_Stop;
+                  declare
+                     Remaining : constant Natural := Text'Length - Position;
+                     Requested : constant Natural := Natural (Generator mod 17) + 1;
+                     Length    : constant Natural := Natural'Min (Remaining, Requested);
+                     Chunk     : constant Ada.Streams.Stream_Element_Array :=
+                       To_Input
+                         (Text (Text'First + Position .. Text'First + Position + Length - 1),
+                          Offset (37 + Position));
                   begin
-                     Core.Initialize (Plain_Parser);
-                     Core.Initialize (Buffered_Parser);
-
-                     if Split > 0 then
-                        declare
-                           Prefix : constant Ada.Streams.Stream_Element_Array :=
-                             To_Input (Text (Text'First .. Text'First + Split - 1), -37);
-                        begin
-                           Check_Chunk (Prefix, 0, False, Stop);
-                        end;
-                     end if;
-
-                     if Split = 0 or else Stop = Core.Drain_Need_Input then
-                        declare
-                           Suffix : constant Ada.Streams.Stream_Element_Array :=
-                             To_Input (Text (Text'First + Split .. Text'Last), 43);
-                        begin
-                           Check_Chunk (Suffix, Core.Byte_Offset (Split), True, Stop);
-                        end;
-                     end if;
+                     Check_Chunk
+                       (Chunk,
+                        Core.Byte_Offset (Position),
+                        Position + Length = Text'Length,
+                        Stop);
+                     Position := Position + Length;
+                     exit when Stop /= Core.Drain_Need_Input;
                   end;
+               end loop;
+            end;
+         else
+            if Split > 0 then
+               declare
+                  Prefix : constant Ada.Streams.Stream_Element_Array :=
+                    To_Input (Text (Text'First .. Text'First + Split - 1), -37);
+               begin
+                  Check_Chunk (Prefix, 0, False, Stop);
+               end;
+            end if;
+
+            if Split = 0 or else Stop = Core.Drain_Need_Input then
+               declare
+                  Suffix : constant Ada.Streams.Stream_Element_Array :=
+                    To_Input (Text (Text'First + Split .. Text'Last), 43);
+               begin
+                  Check_Chunk (Suffix, Core.Byte_Offset (Split), True, Stop);
+               end;
+            end if;
+         end if;
+      end Run_Schedule;
+
+      procedure Check_Text
+        (Text                : String;
+         Maximum_Depth       : Natural := 8;
+         Name_Octet_Capacity : Natural := Test_Name_Octet_Capacity;
+         Name_Capacity       : Natural := Test_Name_Capacity)
+      is
+      begin
+         for Capacity of Capacities loop
+            for Buffer_First of Bounds loop
+               for Split in 0 .. Text'Length loop
+                  Run_Schedule
+                    (Text,
+                     Capacity,
+                     Buffer_First,
+                     Split,
+                     Maximum_Depth       => Maximum_Depth,
+                     Name_Octet_Capacity => Name_Octet_Capacity,
+                     Name_Capacity       => Name_Capacity);
+               end loop;
+
+               for Seed in Interfaces.Unsigned_32 range 1 .. 8 loop
+                  Run_Schedule
+                    (Text,
+                     Capacity,
+                     Buffer_First,
+                     Randomized          => True,
+                     Seed                => Seed,
+                     Maximum_Depth       => Maximum_Depth,
+                     Name_Octet_Capacity => Name_Octet_Capacity,
+                     Name_Capacity       => Name_Capacity);
                end loop;
             end loop;
          end loop;
       end Check_Text;
    begin
+      Check
+        (Core.Buffered_Event'Size = 24 * System.Storage_Unit,
+         "buffered event descriptor no longer occupies 24 octets");
+      Check
+        (Core.Buffered_Event_Array'Component_Size = 24 * System.Storage_Unit,
+         "buffered event array stride no longer occupies 24 octets");
+      Check_Text ("null");
       Check_Text ("[null,true,false,0,-12.3e+4]");
       Check_Text ("[null,true,fa");
       Check_Text ("[null,0");
@@ -2053,7 +2203,18 @@ procedure Flyology_JSON.Parser_Core_Tests is
          & Reverse_Solidus
          & "uDE00"
          & Quote);
+      Check_Text
+        ("{" & Quote & "a" & Quote & ":[0," & Quote & Reverse_Solidus & "u20AC" & Quote & "]}");
+      Check_Text ("truex");
       Check_Text ("[0,]");
+      Check_Text ("[[[0]]]", Maximum_Depth => 2);
+      Check_Text
+        ("{" & Quote & "a" & Quote & ":0," & Quote & Reverse_Solidus & "u0061" & Quote & ":1}");
+      Check_Text
+        ("{" & Quote & "ab" & Quote & ":0}", Name_Octet_Capacity => 1, Name_Capacity => 1);
+      Check_Text (Quote & "a" & Reverse_Solidus & "x" & Quote);
+      Check_Text (Quote & Character'Val (16#E2#) & Character'Val (16#82#));
+      Check_Text (Quote & Reverse_Solidus & "uD800" & Reverse_Solidus & "u0041" & Quote);
       Check_Text (Quote & Reverse_Solidus & "uD800" & Quote);
 
       declare

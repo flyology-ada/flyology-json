@@ -538,7 +538,7 @@ package body Flyology_JSON.Parser_Core is
                Retain_Name_Scalar
                  (Self, (Length => Feed.Value.Length, Octets => Feed.Value.Octets), Retention_Error);
                if Retention_Error /= No_Error then
-                  Defer_Failure (Self, Retention_Error, Self.UTF8_Lead_Offset);
+                  Defer_Failure (Self, Retention_Error, Self.Token_Start);
                   Emit_Raw_Only_Text
                     (Self,
                      Result,
@@ -645,7 +645,7 @@ package body Flyology_JSON.Parser_Core is
          if Track_Name then
             Retain_Name_Scalar (Self, Scalar, Retention_Error);
             if Retention_Error /= No_Error then
-               Defer_Failure (Self, Retention_Error, Decoded_First);
+               Defer_Failure (Self, Retention_Error, Self.Token_Start);
                Emit_Raw_Only_Text
                  (Self,
                   Result,
@@ -698,7 +698,7 @@ package body Flyology_JSON.Parser_Core is
                      if Complete_Count > First_Count then
                         Emit_Complete_Raw_Span;
                      elsif Consume_One (Self, Consumed, Result) then
-                        Defer_Failure (Self, Name_Storage_Exhausted, Scalar_First_Offset);
+                        Defer_Failure (Self, Name_Storage_Exhausted, Self.Token_Start);
                         Emit_Raw_Only_Text (Self, Result, First_Offset, 1, First_Count, 1);
                      end if;
                      return;
@@ -767,7 +767,7 @@ package body Flyology_JSON.Parser_Core is
                            Parser_UTF8.Reset (Self.UTF8);
                            Emit_Complete_Raw_Span;
                         else
-                           Defer_Failure (Self, Name_Storage_Exhausted, Scalar_First_Offset);
+                           Defer_Failure (Self, Name_Storage_Exhausted, Self.Token_Start);
                            Emit_Raw_Only_Text
                              (Self,
                               Result,
@@ -2001,6 +2001,74 @@ package body Flyology_JSON.Parser_Core is
 
    function Buffered_Source (Item : Buffered_Event) return Source_Range
    is (Item.Source);
+
+   function Buffered_Has_Raw_Slice (Item : Buffered_Event) return Boolean
+   is ((Item.Metadata and Has_Raw_Bit) /= 0);
+
+   procedure Resolve_Buffered_Raw_Range
+     (Item         : Buffered_Event;
+      Input_First  : Byte_Offset;
+      Input_Length : Ada.Streams.Stream_Element_Count;
+      Slice        : out Chunk_Range;
+      Status       : out Buffered_Slice_Status)
+   is
+      Window_Length  : constant Byte_Offset := Byte_Offset (Input_Length);
+      Relative_First : Byte_Offset;
+   begin
+      Slice := (First_Count => 0, Octet_Length => 0);
+
+      if not Buffered_Has_Raw_Slice (Item) then
+         Status := No_Raw_Slice;
+         return;
+      end if;
+
+      if Item.Source.First < Input_First then
+         Status := Range_Outside_Window;
+         return;
+      end if;
+
+      Relative_First := Item.Source.First - Input_First;
+      if Relative_First > Window_Length
+        or else Item.Source.Octet_Length > Window_Length - Relative_First
+      then
+         Status := Range_Outside_Window;
+         return;
+      end if;
+
+      Slice :=
+        (First_Count  => Count (Relative_First),
+         Octet_Length => Count (Item.Source.Octet_Length));
+      Status := Slice_Resolved;
+   end Resolve_Buffered_Raw_Range;
+
+   function Buffered_Decoded_Kind (Item : Buffered_Event) return Decoded_Fragment_Kind is
+      Position : constant Interfaces.Unsigned_16 :=
+        (Item.Metadata / Decoded_Kind_Factor) and 2#11#;
+   begin
+      return Decoded_Fragment_Kind'Val (Natural (Position));
+   end Buffered_Decoded_Kind;
+
+   function Buffered_Decoded_Source (Item : Buffered_Event) return Source_Range is
+      Decoded_Kind   : constant Decoded_Fragment_Kind := Buffered_Decoded_Kind (Item);
+      Decoded_Length : constant Byte_Offset :=
+        Byte_Offset ((Item.Metadata / Decoded_Length_Factor) and 2#1111#);
+   begin
+      if Decoded_Kind = Decoded_Is_Raw_Range then
+         return Item.Source;
+      end if;
+
+      return
+        (First        => Item.Source.First + Item.Source.Octet_Length - Decoded_Length,
+         Octet_Length => Decoded_Length);
+   end Buffered_Decoded_Source;
+
+   function Buffered_Decoded_Scalar (Item : Buffered_Event) return Inline_Scalar
+   is
+     (Length => Natural ((Item.Metadata / Scalar_Length_Factor) and 2#111#),
+      Octets => Item.Scalar_Octets);
+
+   function Buffered_Boolean_Data (Item : Buffered_Event) return Boolean
+   is ((Item.Metadata and Boolean_Bit) /= 0);
 
    procedure Publish_One (Item : Buffered_Event; Buffer_Full : out Boolean) is
    begin

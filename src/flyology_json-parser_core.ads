@@ -189,8 +189,41 @@ private package Flyology_JSON.Parser_Core is
 
    function Buffered_Source (Item : Buffered_Event) return Source_Range;
 
+   function Buffered_Has_Raw_Slice (Item : Buffered_Event) return Boolean;
+
+   type Buffered_Slice_Status is (Slice_Resolved, No_Raw_Slice, Range_Outside_Window);
+
+   --  Resolve a raw range only against the exact unchanged Input actual from
+   --  the Buffered_Drain call that returned Item.  Input_First is that call's
+   --  Buffered_Drain_Result.Input_First and Input_Length is Input'Length.  A
+   --  A noncontaining coordinate window returns zero counts without raising;
+   --  coordinate containment cannot establish array identity or staleness.
+   procedure Resolve_Buffered_Raw_Range
+     (Item         : Buffered_Event;
+      Input_First  : Byte_Offset;
+      Input_Length : Ada.Streams.Stream_Element_Count;
+      Slice        : out Chunk_Range;
+      Status       : out Buffered_Slice_Status);
+
+   function Buffered_Decoded_Kind (Item : Buffered_Event) return Decoded_Fragment_Kind;
+
+   function Buffered_Decoded_Source (Item : Buffered_Event) return Source_Range
+   with Pre => Buffered_Decoded_Kind (Item) /= No_Decoded_Fragment;
+
+   function Buffered_Decoded_Scalar (Item : Buffered_Event) return Inline_Scalar
+   with Pre => Buffered_Decoded_Kind (Item) = Decoded_Inline_Scalar;
+
+   function Buffered_Boolean_Data (Item : Buffered_Event) return Boolean
+   with Pre => Buffered_Kind (Item) = Boolean_Value;
+
    pragma Inline_Always (Buffered_Kind);
    pragma Inline_Always (Buffered_Source);
+   pragma Inline_Always (Buffered_Has_Raw_Slice);
+   pragma Inline_Always (Resolve_Buffered_Raw_Range);
+   pragma Inline_Always (Buffered_Decoded_Kind);
+   pragma Inline_Always (Buffered_Decoded_Source);
+   pragma Inline_Always (Buffered_Decoded_Scalar);
+   pragma Inline_Always (Buffered_Boolean_Data);
 
    procedure Abort_Document (Self : in out Parser);
 
