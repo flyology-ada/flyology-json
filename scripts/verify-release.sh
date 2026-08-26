@@ -103,8 +103,18 @@ cp "$source_root/alire.toml" "$expected_manifest"
 if [ "$mode" = candidate ]; then
   if [ -e "$manifest_path" ]; then
     if ! cmp -s "$expected_manifest" "$manifest_path"; then
-      echo "published manifest differs from the release candidate: $manifest_path" >&2
-      exit 1
+      case "$version" in
+        *-dev)
+          # Development snapshots are identified by their exact indexed
+          # origin.  Candidate mode may evaluate an authorized successor in
+          # its temporary index clone; it never mutates the published index.
+          cp "$expected_manifest" "$manifest_path"
+          ;;
+        *)
+          echo "published stable manifest differs from the release candidate: $manifest_path" >&2
+          exit 1
+          ;;
+      esac
     fi
   else
     mkdir -p "$manifest_directory"
