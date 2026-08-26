@@ -17,9 +17,18 @@ is
    --  @enum Unicode_Scalars UTF-8 and escapes must decode to Unicode scalar values.
    type Unicode_Family is (Unicode_Scalars);
 
-   --  Compatibility family that controls nonstandard JSON extensions.
+   --  Compatibility family that controls nonstandard JSON extensions.  Each
+   --  family is explicit so accepting one extension never silently enables
+   --  another.  Comments are validated UTF-8 trivia: `//` ends at CR, LF, or
+   --  final input, while non-nested `/* */` ends at its first closing
+   --  delimiter.  The parser emits no comment events.  A trailing comma is
+   --  admitted only after at least one array item or object member.
    --  @enum No_Extensions Reject comments, trailing commas, and nonstandard token spellings.
-   type Compatibility_Family is (No_Extensions);
+   --  @enum Comments Accept line and block comments where JSON whitespace is legal.
+   --  @enum Trailing_Commas Accept one trailing comma after an array item or object member.
+   --  @enum Comments_And_Trailing_Commas Accept both documented extensions.
+   type Compatibility_Family is
+     (No_Extensions, Comments, Trailing_Commas, Comments_And_Trailing_Commas);
 
    --  Policy for a UTF-8 byte-order mark at byte zero.
    --  @enum Reject_BOM Report a byte-order mark as malformed input.

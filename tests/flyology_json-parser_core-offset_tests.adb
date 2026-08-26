@@ -278,6 +278,25 @@ procedure Flyology_JSON.Parser_Core.Offset_Tests is
       end;
    end Check_Dense_Zero_Offset_Boundaries;
 
+   procedure Check_Comment_Offset_Boundary is
+      Subject : Parser (0, 0, 0, Reject_Duplicates);
+      Input   : constant Ada.Streams.Stream_Element_Array := To_Input ("//", -71);
+      Item    : Next_Result;
+      Empty   : Ada.Streams.Stream_Element_Array (1 .. 0);
+   begin
+      Initialize (Subject, Accept_Any, Comments);
+      Next (Subject, Empty, False, Item);
+      Check (Item.Outcome = Event_Ready, "comment offset setup omitted document begin");
+      Subject.Next_Offset := Byte_Offset'Last - 1;
+
+      Next (Subject, Input, False, Item);
+      Check (Item.Outcome = Parse_Failed, "comment crossed the source-offset limit");
+      Check (Item.Consumed = 1, "comment consumed its unrepresentable second delimiter byte");
+      Check (Item.Diagnostic.Code = Offset_Exhausted, "comment offset denial changed status");
+      Check (Item.Diagnostic.Offset = Byte_Offset'Last, "comment offset denial moved");
+      Check (Subject.Next_Offset = Byte_Offset'Last, "comment offset denial wrapped the coordinate");
+   end Check_Comment_Offset_Boundary;
+
    --  Explicit storage for the reset fixture; these values are not defaults.
    Self        : Parser (1, 16, 4, Reject_Duplicates);
    Result      : Next_Result;
@@ -326,4 +345,5 @@ begin
    Check_Literal_Offset_Boundaries;
    Check_Drain_Offset_Boundaries;
    Check_Dense_Zero_Offset_Boundaries;
+   Check_Comment_Offset_Boundary;
 end Flyology_JSON.Parser_Core.Offset_Tests;

@@ -503,13 +503,14 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Name_Octet_Capacity : Natural := Test_Name_Octet_Capacity;
       Name_Capacity       : Natural := Test_Name_Capacity;
       Duplicate_Handling  : Core.Duplicate_Mode := Core.Reject_Duplicates;
-      Top_Level           : Core.Root_Policy := Core.Accept_Any) return Observation
+      Top_Level           : Core.Root_Policy := Core.Accept_Any;
+      Compatibility       : Core.Compatibility_Mode := Core.No_Extensions) return Observation
    is
       Parser : Core.Parser
         (Maximum_Depth, Name_Octet_Capacity, Name_Capacity, Duplicate_Handling);
       Seen   : Observation;
    begin
-      Core.Initialize (Parser, Top_Level);
+      Core.Initialize (Parser, Top_Level, Compatibility);
 
       if Split > 0 then
          declare
@@ -540,13 +541,14 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Buffer_First  : Offset;
       Maximum_Depth : Natural := 8;
       Duplicate_Handling : Core.Duplicate_Mode := Core.Reject_Duplicates;
-      Top_Level : Core.Root_Policy := Core.Accept_Any) return Observation
+      Top_Level : Core.Root_Policy := Core.Accept_Any;
+      Compatibility : Core.Compatibility_Mode := Core.No_Extensions) return Observation
    is
       Parser : Core.Parser
         (Maximum_Depth, Test_Name_Octet_Capacity, Test_Name_Capacity, Duplicate_Handling);
       Seen   : Observation;
    begin
-      Core.Initialize (Parser, Top_Level);
+      Core.Initialize (Parser, Top_Level, Compatibility);
 
       if Split > 0 then
          declare
@@ -575,12 +577,13 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Name_Octet_Capacity : Natural := Test_Name_Octet_Capacity;
       Name_Capacity       : Natural := Test_Name_Capacity;
       Duplicate_Handling  : Core.Duplicate_Mode := Core.Reject_Duplicates;
-      Top_Level           : Core.Root_Policy := Core.Accept_Any) return Observation
+      Top_Level           : Core.Root_Policy := Core.Accept_Any;
+      Compatibility       : Core.Compatibility_Mode := Core.No_Extensions) return Observation
    is
       Parser : Core.Parser (8, Name_Octet_Capacity, Name_Capacity, Duplicate_Handling);
       Seen   : Observation;
    begin
-      Core.Initialize (Parser, Top_Level);
+      Core.Initialize (Parser, Top_Level, Compatibility);
 
       if Text'Length = 0 then
          declare
@@ -621,7 +624,8 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Name_Octet_Capacity : Natural := Test_Name_Octet_Capacity;
       Name_Capacity       : Natural := Test_Name_Capacity;
       Duplicate_Handling  : Core.Duplicate_Mode := Core.Reject_Duplicates;
-      Top_Level           : Core.Root_Policy := Core.Accept_Any) return Observation
+      Top_Level           : Core.Root_Policy := Core.Accept_Any;
+      Compatibility       : Core.Compatibility_Mode := Core.No_Extensions) return Observation
    is
       --  Campaign data only.  These LCG coefficients do not affect parser behavior.
       Generator : Interfaces.Unsigned_32 := Seed;
@@ -629,7 +633,7 @@ procedure Flyology_JSON.Parser_Core_Tests is
       Seen      : Observation;
       Position  : Natural := 0;
    begin
-      Core.Initialize (Parser, Top_Level);
+      Core.Initialize (Parser, Top_Level, Compatibility);
 
       while Position < Text'Length loop
          Generator := Generator * 1_664_525 + 1_013_904_223;
@@ -724,14 +728,17 @@ procedure Flyology_JSON.Parser_Core_Tests is
    end Parse_Randomized_Batched;
 
    function Parse_Partition
-     (Text : String; Boundaries : Interfaces.Unsigned_32; Allow_Failure : Boolean := False) return Observation
+     (Text          : String;
+      Boundaries    : Interfaces.Unsigned_32;
+      Allow_Failure : Boolean := False;
+      Compatibility : Core.Compatibility_Mode := Core.No_Extensions) return Observation
    is
       Parser      : Core.Parser (8, Test_Name_Octet_Capacity, Test_Name_Capacity, Core.Reject_Duplicates);
       Seen        : Observation;
       Chunk_First : Natural := 0;
    begin
       Check (Text'Length > 0, "partition schedule requires a nonempty fixture");
-      Core.Initialize (Parser);
+      Core.Initialize (Parser, Core.Accept_Any, Compatibility);
 
       for Position in 0 .. Text'Length - 1 loop
          if Position = Text'Length - 1 or else (Boundaries and Interfaces.Shift_Left (1, Position)) /= 0 then
@@ -804,6 +811,106 @@ procedure Flyology_JSON.Parser_Core_Tests is
          Check_Observation (Parse_Randomized (Text, Seed), "random schedule" & Seed'Image);
       end loop;
    end Check_Valid_Splits;
+
+   procedure Check_Compatible_Splits
+     (Text                   : String;
+      Compatibility          : Core.Compatibility_Mode;
+      Expected_Number_Octets : Count := 0;
+      Expected_Number_Text   : String := "";
+      Expected_Arrays        : Natural := 0;
+      Expected_Objects       : Natural := 0)
+   is
+      procedure Check_Observation (Seen : Observation; Schedule : String) is
+      begin
+         Check
+           (Seen.Outcome = Core.Document_Complete,
+            Schedule
+            & " rejected compatible JSON with "
+            & Seen.Outcome'Image
+            & "/"
+            & Seen.Diagnostic.Code'Image
+            & " at"
+            & Seen.Diagnostic.Offset'Image
+            & " events number-begin="
+            & Seen.Events (Core.Number_Begin)'Image
+            & " fragment="
+            & Seen.Events (Core.Number_Fragment)'Image
+            & " end="
+            & Seen.Events (Core.Number_End)'Image);
+         Check (Seen.Events (Core.Document_Begin) = 1, Schedule & " omitted document begin");
+         Check (Seen.Events (Core.Document_End) = 1, Schedule & " omitted document end");
+         Check
+           (Seen.Number_Fragment_Octets = Expected_Number_Octets,
+            Schedule & " changed number fragment length");
+         Check
+           (Seen.Number_Text (1 .. Seen.Number_Length) = Expected_Number_Text,
+            Schedule & " changed exact number lexeme");
+         Check (Seen.Events (Core.Array_Begin) = Expected_Arrays, Schedule & " changed array count");
+         Check (Seen.Events (Core.Array_End) = Expected_Arrays, Schedule & " changed array close count");
+         Check (Seen.Events (Core.Object_Begin) = Expected_Objects, Schedule & " changed object count");
+         Check (Seen.Events (Core.Object_End) = Expected_Objects, Schedule & " changed object close count");
+      end Check_Observation;
+   begin
+      for Split in 0 .. Text'Length loop
+         Check_Observation
+           (Parse (Text, Split, Compatibility => Compatibility),
+            "compatible two-chunk split" & Natural'Image (Split));
+      end loop;
+
+      Check_Observation
+        (Parse_One_Byte (Text, Compatibility => Compatibility), "compatible one-byte schedule");
+      for Seed in Interfaces.Unsigned_32 range 1 .. 16 loop
+         Check_Observation
+           (Parse_Randomized (Text, Seed, Compatibility => Compatibility),
+            "compatible random schedule" & Seed'Image);
+      end loop;
+
+      if Text'Length in 1 .. 16 then
+         declare
+            Last_Mask : constant Interfaces.Unsigned_32 :=
+              Interfaces.Shift_Left (1, Text'Length - 1) - 1;
+         begin
+            for Mask in Interfaces.Unsigned_32 range 0 .. Last_Mask loop
+               Check_Observation
+                 (Parse_Partition (Text, Mask, Compatibility => Compatibility),
+                  "compatible partition" & Mask'Image);
+            end loop;
+         end;
+      end if;
+   end Check_Compatible_Splits;
+
+   procedure Check_Compatible_Invalid
+     (Text          : String;
+      Compatibility : Core.Compatibility_Mode;
+      Code          : Core.Error_Code;
+      At_Byte       : Core.Byte_Offset)
+   is
+      procedure Check_Observation (Seen : Observation; Schedule : String) is
+      begin
+         Check (Seen.Outcome = Core.Parse_Failed, Schedule & " accepted malformed compatible input");
+         Check (Seen.Diagnostic.Code = Code, Schedule & " changed compatible-input error code");
+         Check
+           (Seen.Diagnostic.Offset = At_Byte,
+            Schedule
+            & " changed compatible-input error offset: expected"
+            & At_Byte'Image
+            & ", got"
+            & Seen.Diagnostic.Offset'Image);
+      end Check_Observation;
+   begin
+      for Split in 0 .. Text'Length loop
+         Check_Observation
+           (Parse (Text, Split, Compatibility => Compatibility),
+            "invalid compatible split" & Natural'Image (Split));
+      end loop;
+      Check_Observation
+        (Parse_One_Byte (Text, Compatibility => Compatibility), "invalid compatible one-byte schedule");
+      for Seed in Interfaces.Unsigned_32 range 1 .. 8 loop
+         Check_Observation
+           (Parse_Randomized (Text, Seed, Compatibility => Compatibility),
+            "invalid compatible random schedule" & Seed'Image);
+      end loop;
+   end Check_Compatible_Invalid;
 
    procedure Check_Valid_Text_Splits
      (Text             : String;
@@ -2805,8 +2912,86 @@ begin
    Check_Invalid_Literal ("fals", Core.Truncated_Input, 4);
    Check_Invalid ("01", Core.Invalid_Number, 1);
    Check_Invalid ("[0,]", Core.Unexpected_Token, 3);
+   Check_Invalid ("/", Core.Unexpected_Token, 0);
    Check_Invalid ("1.", Core.Truncated_Input, 2);
    Check_Literal_Transport;
+
+   --  Compatibility modes are independent: comments do not imply trailing
+   --  commas, and trailing commas do not make a solidus into trivia.
+   Check_Compatible_Splits
+     ("//x" & ASCII.LF & "0",
+      Core.Comments,
+      Expected_Number_Octets => 1,
+      Expected_Number_Text   => "0");
+   Check_Compatible_Splits
+     ("//x" & ASCII.CR & "0",
+      Core.Comments,
+      Expected_Number_Octets => 1,
+      Expected_Number_Text   => "0");
+   Check_Compatible_Splits
+     ("//x" & ASCII.CR & ASCII.LF & "0",
+      Core.Comments,
+      Expected_Number_Octets => 1,
+      Expected_Number_Text   => "0");
+   Check_Compatible_Splits
+     ("/*x*/0//tail",
+      Core.Comments,
+      Expected_Number_Octets => 1,
+      Expected_Number_Text   => "0");
+   Check_Compatible_Splits
+     ("0/*outer/*inner*/",
+      Core.Comments,
+      Expected_Number_Octets => 1,
+      Expected_Number_Text   => "0");
+   Check_Compatible_Splits
+     ("[" & Quote & "//" & Quote & "," & Quote & "/*x*/" & Quote & "]",
+      Core.Comments,
+      Expected_Arrays => 1);
+   Check_Compatible_Splits
+     ("[null/*a*/,true//b" & ASCII.LF & ",0]",
+      Core.Comments,
+      Expected_Number_Octets => 1,
+      Expected_Number_Text   => "0",
+      Expected_Arrays        => 1);
+   Check_Compatible_Splits
+     ("/*" & Euro & "*/{" & Quote & "a" & Quote & "/*n*/:/*v*/false}",
+      Core.Comments,
+      Expected_Objects => 1);
+   Check_Compatible_Splits
+     ("[0,]",
+      Core.Trailing_Commas,
+      Expected_Number_Octets => 1,
+      Expected_Number_Text   => "0",
+      Expected_Arrays        => 1);
+   Check_Compatible_Splits
+     ("{" & Quote & "a" & Quote & ":0,}",
+      Core.Trailing_Commas,
+      Expected_Number_Octets => 1,
+      Expected_Number_Text   => "0",
+      Expected_Objects       => 1);
+   Check_Compatible_Splits
+     ("[0,/*tail*/]",
+      Core.Comments_And_Trailing_Commas,
+      Expected_Number_Octets => 1,
+      Expected_Number_Text   => "0",
+      Expected_Arrays        => 1);
+   Check_Compatible_Splits
+     ("{" & Quote & "a" & Quote & ":true,//tail" & ASCII.LF & "}",
+      Core.Comments_And_Trailing_Commas,
+      Expected_Objects => 1);
+
+   Check_Compatible_Invalid ("[0,]", Core.Comments, Core.Unexpected_Token, 3);
+   Check_Compatible_Invalid ("/*x*/0", Core.Trailing_Commas, Core.Unexpected_Token, 0);
+   Check_Compatible_Invalid ("[,]", Core.Trailing_Commas, Core.Unexpected_Token, 1);
+   Check_Compatible_Invalid ("[0,,]", Core.Trailing_Commas, Core.Unexpected_Token, 3);
+   Check_Compatible_Invalid
+     ("{" & Quote & "a" & Quote & ":0,,}", Core.Trailing_Commas, Core.Unexpected_Token, 7);
+   Check_Compatible_Invalid ("/", Core.Comments, Core.Truncated_Input, 1);
+   Check_Compatible_Invalid ("/x", Core.Comments, Core.Unexpected_Token, 0);
+   Check_Compatible_Invalid ("/*", Core.Comments, Core.Truncated_Input, 2);
+   Check_Compatible_Invalid ("/*x", Core.Comments, Core.Truncated_Input, 3);
+   Check_Compatible_Invalid
+     ("/*" & Character'Val (16#C2#) & ' ' & "*/0", Core.Comments, Core.Invalid_UTF8, 3);
 
    Check_Duplicate ("{" & Quote & "a" & Quote & ":0," & Quote & "a" & Quote & ":1}", 7);
    Check_Duplicate ("{" & Quote & "a" & Quote & ":0," & Quote & Reverse_Solidus & "u0061" & Quote & ":1}", 7);

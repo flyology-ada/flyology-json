@@ -19,7 +19,7 @@
   <main id="main">
     <section class="guide-hero page-shell"><span class="eyebrow">Guide · Profiles and errors</span><h1>Make acceptance policy visible.</h1><p>One explicit profile is frozen before byte zero or destination staging. Failures return diagnostics with defined coordinate systems.</p></section>
     <div class="guide-layout page-shell">
-      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#profile">Construct a profile</a></li><li><a href="#strict">Know strict behavior</a></li><li><a href="#duplicates">Choose duplicate handling</a></li><li><a href="#output">Choose output policy</a></li><li><a href="#diagnostic">Read a diagnostic</a></li><li><a href="#resources">Separate resources</a></li></ol></aside>
+      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#profile">Construct a profile</a></li><li><a href="#strict">Know strict behavior</a></li><li><a href="#extensions">Select extensions</a></li><li><a href="#duplicates">Choose duplicate handling</a></li><li><a href="#output">Choose output policy</a></li><li><a href="#diagnostic">Read a diagnostic</a></li><li><a href="#resources">Separate resources</a></li></ol></aside>
       <article class="prose">
         <section id="profile">
           <h2>Construct every profile field</h2>
@@ -28,9 +28,22 @@
         </section>
         <section id="strict">
           <h2>Know the current strict behavior</h2>
-          <p>The implemented family combination follows RFC 8259 syntax and validates Unicode scalar values. It rejects:</p>
+          <p>The strict family combination follows RFC 8259 syntax and validates Unicode scalar values. Select <a data-api="Flyology_JSON.Profiles.Compatibility_Family.No_Extensions"><code>No_Extensions</code></a> to reject:</p>
           <ul><li>a UTF-8 BOM and malformed UTF-8;</li><li>unpaired surrogates and raw control characters;</li><li>comments and trailing commas;</li><li>nonstandard or nonfinite number spellings.</li></ul>
           <p>The top-level policy accepts any JSON value or requires an object. Neither choice is implicit.</p>
+        </section>
+        <section id="extensions">
+          <h2>Select extensions independently</h2>
+          <p><a data-api="Flyology_JSON.Profiles.Compatibility_Family"><code>Compatibility_Family</code></a> provides four explicit choices:</p>
+          <table><thead><tr><th>Family</th><th>Accepted extension</th></tr></thead><tbody>
+            <tr><td><code>No_Extensions</code></td><td>None.</td></tr>
+            <tr><td><a data-api="Flyology_JSON.Profiles.Compatibility_Family.Comments"><code>Comments</code></a></td><td><code>//</code> line comments and non-nested <code>/* */</code> block comments where whitespace is legal.</td></tr>
+            <tr><td><a data-api="Flyology_JSON.Profiles.Compatibility_Family.Trailing_Commas"><code>Trailing_Commas</code></a></td><td>One comma after the last item or member in a nonempty container.</td></tr>
+            <tr><td><a data-api="Flyology_JSON.Profiles.Compatibility_Family.Comments_And_Trailing_Commas"><code>Comments_And_Trailing_Commas</code></a></td><td>Both behaviors above.</td></tr>
+          </tbody></table>
+          <p>The parser validates comment text as UTF-8 across chunk boundaries. Comments are trivia, so the parser does not emit comment events. Their octets still contribute to absolute source offsets.</p>
+          <p>A line comment ends at CR, LF, or final input. A block comment ends at the first <code>*/</code> and does not nest. An unterminated block comment fails as truncated input.</p>
+          <p>Trailing-comma mode still rejects a leading comma, an empty comma-only container, doubled commas, and a missing value or member.</p>
         </section>
         <section id="duplicates">
           <h2>Choose duplicate handling at instantiation</h2>

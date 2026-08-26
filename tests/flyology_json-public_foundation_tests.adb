@@ -48,6 +48,13 @@ procedure Flyology_JSON.Public_Foundation_Tests is
          Formatting => (Policy => Profiles.Ordinary_Compact, Version => 1));
    begin
       Check (Profiles.Validate (Parser) = Profiles.Profile_Supported, "strict parser profile rejected");
+      for Family in Profiles.Compatibility_Family loop
+         Check
+           (Profiles.Validate
+              ((Parser with delta Compatibility => (Family => Family, Version => 1)))
+            = Profiles.Profile_Supported,
+            "declared compatibility family was rejected");
+      end loop;
       Check (Profiles.Validate (Writer) = Profiles.Profile_Supported, "compact writer profile rejected");
       Check
         (Profiles.Validate ((Parser with delta Syntax => (Family => Profiles.RFC_8259, Version => 2)))

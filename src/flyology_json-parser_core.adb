@@ -28,6 +28,8 @@ package body Flyology_JSON.Parser_Core is
    Right_Bracket   : constant Octet := Character'Pos (']');
    Comma           : constant Octet := Character'Pos (',');
    Colon           : constant Octet := Character'Pos (':');
+   Solidus         : constant Octet := Character'Pos ('/');
+   Asterisk        : constant Octet := Character'Pos ('*');
    Reverse_Solidus : constant Octet := Character'Pos ('\');
 
    Empty_Diagnostic : constant Diagnostic := (Code => No_Error, Offset => 0);
@@ -65,8 +67,21 @@ package body Flyology_JSON.Parser_Core is
        or else Value = Lower_E
        or else Value = Upper_E);
 
-   function Is_Token_Delimiter (Value : Octet) return Boolean
-   is (Is_Whitespace (Value) or else Value = Comma or else Value = Right_Brace or else Value = Right_Bracket);
+   function Comments_Are_Allowed (Self : Parser) return Boolean
+   is (Self.Applied_Compatibility in Comments | Comments_And_Trailing_Commas);
+
+   function Trailing_Commas_Are_Allowed (Self : Parser) return Boolean
+   is (Self.Applied_Compatibility in Trailing_Commas | Comments_And_Trailing_Commas);
+
+   pragma Inline_Always (Comments_Are_Allowed);
+   pragma Inline_Always (Trailing_Commas_Are_Allowed);
+
+   function Is_Token_Delimiter (Self : Parser; Value : Octet) return Boolean
+   is (Is_Whitespace (Value)
+       or else Value = Comma
+       or else Value = Right_Brace
+       or else Value = Right_Bracket
+       or else (Value = Solidus and then Comments_Are_Allowed (Self)));
 
    function Is_Non_Object_Root_Start (Value : Octet) return Boolean
    is (Value = Left_Bracket
@@ -1180,7 +1195,7 @@ package body Flyology_JSON.Parser_Core is
 
       if Consumed < Input'Length then
          Value := Input_Octet (Input, Consumed);
-         if not Is_Token_Delimiter (Value) then
+         if not Is_Token_Delimiter (Self, Value) then
             if Consume_One (Self, Consumed, Result) then
                Fail (Self, Result, Invalid_Literal, Self.Next_Offset - 1);
             end if;
@@ -1251,7 +1266,7 @@ package body Flyology_JSON.Parser_Core is
 
       if Consumed < Input'Length then
          Value := Input_Octet (Input, Consumed);
-         if not Is_Token_Delimiter (Value) then
+         if not Is_Token_Delimiter (Self, Value) then
             Begin_Scalar_Value (Self);
             if Consume_One (Self, Consumed, Result) then
                Fail (Self, Result, Invalid_Literal, Self.Next_Offset - 1);
@@ -1342,7 +1357,7 @@ package body Flyology_JSON.Parser_Core is
             if not Consume_One (Self, Consumed, Result) then
                return;
             end if;
-         elsif Is_Token_Delimiter (Value) then
+         elsif Is_Token_Delimiter (Self, Value) then
             if not Parser_Numbers.Accepting_End (Self.Number) then
                if Consumed > First_Count then
                   Set_Event
@@ -1473,7 +1488,150 @@ package body Flyology_JSON.Parser_Core is
         (Result, (if Kind = Array_Container then Array_End else Object_End), Start, 1, True, Consumed - 1, 1);
    end Close_Container;
 
-   procedure Initialize (Self : in out Parser; Top_Level : Root_Policy) is
+   --  Consume resumable comment trivia without publishing events.  ASCII
+   --  delimiters are recognized only between complete UTF-8 scalars, so a
+   --  malformed multibyte sequence cannot hide a comment terminator.
+   procedure Process_Comment_Trivia
+     (Self         : in out Parser;
+      Input        : Ada.Streams.Stream_Element_Array;
+      End_Of_Input : Boolean;
+      Consumed     : in out Count;
+      Result       : in out Engine_Result;
+      Continue     : out Boolean)
+   is
+      Value       : Octet;
+      Feed        : Parser_UTF8.Feed_Result;
+      Candidate   : Parser_UTF8.Decoder;
+      Value_Start : Byte_Offset;
+
+      procedure Consume_Comment_Text_Octet is
+      begin
+         Value_Start := Self.Next_Offset;
+         if not Parser_UTF8.Has_Pending_Octets (Self.UTF8) then
+            Self.UTF8_Lead_Offset := Value_Start;
+         end if;
+
+         Candidate := Self.UTF8;
+         Parser_UTF8.Feed (Candidate, Value, Feed);
+         if Feed.Status = Parser_UTF8.Invalid then
+            if Consume_One (Self, Consumed, Result) then
+               Fail
+                 (Self,
+                  Result,
+                  Invalid_UTF8,
+                  (if Feed.Blame = Parser_UTF8.Stored_Lead_Octet
+                   then Self.UTF8_Lead_Offset
+                   else Value_Start));
+            end if;
+            return;
+         end if;
+
+         Self.UTF8 := Candidate;
+         if not Consume_One (Self, Consumed, Result) then
+            return;
+         end if;
+      end Consume_Comment_Text_Octet;
+   begin
+      Continue := False;
+
+      loop
+         if Consumed = Input'Length then
+            if not End_Of_Input then
+               Result.Outcome := Need_Input;
+               return;
+            end if;
+
+            if Self.Trivia = Line_Comment
+              and then not Parser_UTF8.Has_Pending_Octets (Self.UTF8)
+            then
+               Self.Trivia := No_Comment;
+               Continue := True;
+            else
+               Fail (Self, Result, Truncated_Input, Self.Next_Offset);
+            end if;
+            return;
+         end if;
+
+         Value := Input_Octet (Input, Consumed);
+
+         case Self.Trivia is
+            when No_Comment       =>
+               pragma Assert (Value = Solidus and then Comments_Are_Allowed (Self));
+               Parser_UTF8.Reset (Self.UTF8);
+               if not Consume_One (Self, Consumed, Result) then
+                  return;
+               end if;
+               Self.Trivia := Comment_Opening;
+
+            when Comment_Opening  =>
+               if Value = Solidus then
+                  if not Consume_One (Self, Consumed, Result) then
+                     return;
+                  end if;
+                  Self.Trivia := Line_Comment;
+               elsif Value = Asterisk then
+                  if not Consume_One (Self, Consumed, Result) then
+                     return;
+                  end if;
+                  Self.Trivia := Block_Comment;
+               else
+                  Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
+                  return;
+               end if;
+
+            when Line_Comment     =>
+               if not Parser_UTF8.Has_Pending_Octets (Self.UTF8)
+                 and then Value in Character'Pos (ASCII.CR) | Character'Pos (ASCII.LF)
+               then
+                  Self.Trivia := No_Comment;
+                  Continue := True;
+                  return;
+               end if;
+
+               Consume_Comment_Text_Octet;
+               if Self.Current_State = Failed then
+                  return;
+               end if;
+
+            when Block_Comment    =>
+               if not Parser_UTF8.Has_Pending_Octets (Self.UTF8) and then Value = Asterisk then
+                  if not Consume_One (Self, Consumed, Result) then
+                     return;
+                  end if;
+                  Self.Trivia := Block_After_Star;
+               else
+                  Consume_Comment_Text_Octet;
+                  if Self.Current_State = Failed then
+                     return;
+                  end if;
+               end if;
+
+            when Block_After_Star =>
+               if Value = Solidus then
+                  if not Consume_One (Self, Consumed, Result) then
+                     return;
+                  end if;
+                  Self.Trivia := No_Comment;
+                  Continue := True;
+                  return;
+               elsif Value = Asterisk then
+                  if not Consume_One (Self, Consumed, Result) then
+                     return;
+                  end if;
+               else
+                  Self.Trivia := Block_Comment;
+                  Consume_Comment_Text_Octet;
+                  if Self.Current_State = Failed then
+                     return;
+                  end if;
+               end if;
+         end case;
+      end loop;
+   end Process_Comment_Trivia;
+
+   procedure Initialize
+     (Self : in out Parser; Top_Level : Root_Policy; Compatibility : Compatibility_Mode)
+   is
    begin
       if Self.Current_State = Uninitialized then
          Self.Current_State := Ready;
@@ -1481,11 +1639,13 @@ package body Flyology_JSON.Parser_Core is
          Self.Next_Offset := 0;
          Self.Depth := 0;
          Self.Applied_Root_Policy := Top_Level;
+         Self.Applied_Compatibility := Compatibility;
          Self.Final_Input_Seen := False;
          Self.Root_Started := False;
          Self.Root_Complete := False;
          Self.Document_End_Sent := False;
          Self.Token := No_Token;
+         Self.Trivia := No_Comment;
          Self.Text_State := Text_Content;
          Self.Text_Hex_Value := 0;
          Self.Text_Hex_Digits := 0;
@@ -1500,9 +1660,14 @@ package body Flyology_JSON.Parser_Core is
       end if;
    end Initialize;
 
+   procedure Initialize (Self : in out Parser; Top_Level : Root_Policy) is
+   begin
+      Initialize (Self, Top_Level, No_Extensions);
+   end Initialize;
+
    procedure Initialize (Self : in out Parser) is
    begin
-      Initialize (Self, Accept_Any);
+      Initialize (Self, Accept_Any, No_Extensions);
    end Initialize;
 
    generic
@@ -1522,9 +1687,11 @@ package body Flyology_JSON.Parser_Core is
       End_Of_Input : Boolean;
       Result       : out Engine_Result)
    is
-      Consumed    : Count := 0;
-      Value       : Octet;
-      Buffer_Full : Boolean;
+      Consumed         : Count := 0;
+      Value            : Octet;
+      Buffer_Full      : Boolean;
+      Trivia_Complete  : Boolean;
+      Comments_Enabled : constant Boolean := Comments_Are_Allowed (Self);
 
       procedure Process_Initial_Number_Burst (Stop_Run : out Boolean) is
          Published_Kind   : Event_Kind;
@@ -1532,7 +1699,7 @@ package body Flyology_JSON.Parser_Core is
            Input_Octet (Input, Consumed) = Zero
            and then Self.Next_Offset /= Byte_Offset'Last
            and then ((Consumed + 1 < Input'Length
-                      and then Is_Token_Delimiter (Input_Octet (Input, Consumed + 1)))
+                      and then Is_Token_Delimiter (Self, Input_Octet (Input, Consumed + 1)))
                      or else (Consumed + 1 = Input'Length and then End_Of_Input));
          Zero_Start       : constant Byte_Offset := Self.Next_Offset;
          Zero_Transition  : Parser_Numbers.Transition_Result;
@@ -1627,7 +1794,7 @@ package body Flyology_JSON.Parser_Core is
                  and then Can_Publish (3)
                  and then Self.Next_Offset <= Byte_Offset'Last - 2
                  and then ((Consumed + 2 < Input'Length
-                            and then Is_Token_Delimiter (Input_Octet (Input, Consumed + 2)))
+                            and then Is_Token_Delimiter (Self, Input_Octet (Input, Consumed + 2)))
                            or else (Consumed + 2 = Input'Length and then End_Of_Input))
                then
                   Scalar_Start := Self.Next_Offset + 1;
@@ -1695,7 +1862,7 @@ package body Flyology_JSON.Parser_Core is
                   if Matches
                     and then (Complete_Limit = Input'Length
                               or else Input_Octet (Input, Complete_Limit) = Comma
-                              or else Is_Token_Delimiter (Input_Octet (Input, Complete_Limit)))
+                              or else Is_Token_Delimiter (Self, Input_Octet (Input, Complete_Limit)))
                   then
                      Scalar_Start := Self.Next_Offset + 1;
                      Consumed := Complete_Limit;
@@ -1834,12 +2001,36 @@ package body Flyology_JSON.Parser_Core is
 
             Grammar_Loop :
             loop
-               while Consumed < Input'Length and then Is_Whitespace (Input_Octet (Input, Consumed)) loop
-                  exit when not Consume_One (Self, Consumed, Result);
-               end loop;
+               if Comments_Enabled then
+                  while Self.Trivia = No_Comment
+                    and then Consumed < Input'Length
+                    and then Is_Whitespace (Input_Octet (Input, Consumed))
+                  loop
+                     exit when not Consume_One (Self, Consumed, Result);
+                  end loop;
+               else
+                  while Consumed < Input'Length
+                    and then Is_Whitespace (Input_Octet (Input, Consumed))
+                  loop
+                     exit when not Consume_One (Self, Consumed, Result);
+                  end loop;
+               end if;
 
                if Self.Current_State = Failed then
                   exit One_Event;
+               end if;
+
+               if Comments_Enabled
+                 and then (Self.Trivia /= No_Comment
+                           or else (Consumed < Input'Length
+                                    and then Input_Octet (Input, Consumed) = Solidus))
+               then
+                  Process_Comment_Trivia
+                    (Self, Input, End_Of_Input, Consumed, Result, Trivia_Complete);
+                  if not Trivia_Complete then
+                     exit One_Event;
+                  end if;
+                  goto Continue_Parsing;
                end if;
 
                if Consumed = Input'Length then
@@ -1930,7 +2121,9 @@ package body Flyology_JSON.Parser_Core is
                         end if;
 
                      when Object_Name                 =>
-                        if Value = Quote then
+                        if Value = Right_Brace and then Trailing_Commas_Are_Allowed (Self) then
+                           Close_Container (Self, Object_Container, Result, Consumed);
+                        elsif Value = Quote then
                            if Self.Duplicate_Handling = Reject_Duplicates then
                               Start_Tracked_Text (Self, Name_Token, Result, Consumed);
                            else
@@ -1966,7 +2159,10 @@ package body Flyology_JSON.Parser_Core is
                         end if;
 
                      when Array_Value                 =>
-                        if Value = Right_Bracket then
+                        if Value = Right_Bracket and then Trailing_Commas_Are_Allowed (Self) then
+                           Close_Container (Self, Array_Container, Result, Consumed);
+                           exit One_Event;
+                        elsif Value = Right_Bracket then
                            if Consume_One (Self, Consumed, Result) then
                               Fail (Self, Result, Unexpected_Token, Self.Next_Offset - 1);
                            end if;
@@ -2326,14 +2522,21 @@ package body Flyology_JSON.Parser_Core is
 
    procedure Reset (Self : in out Parser) is
    begin
-      Reset (Self, Self.Applied_Root_Policy);
+      Reset (Self, Self.Applied_Root_Policy, Self.Applied_Compatibility);
    end Reset;
 
    procedure Reset (Self : in out Parser; Top_Level : Root_Policy) is
    begin
+      Reset (Self, Top_Level, No_Extensions);
+   end Reset;
+
+   procedure Reset
+     (Self : in out Parser; Top_Level : Root_Policy; Compatibility : Compatibility_Mode)
+   is
+   begin
       if Self.Current_State in Failure_Pending | Completed | Failed | Aborted then
          Self.Current_State := Uninitialized;
-         Initialize (Self, Top_Level);
+         Initialize (Self, Top_Level, Compatibility);
       end if;
    end Reset;
 

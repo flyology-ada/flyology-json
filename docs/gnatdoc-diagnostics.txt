@@ -3,4 +3,4 @@
 # allowlist is docs/gnatdoc-public-units.txt. Omitted declarations, if any, are
 # listed as exact omission records below these two fields.
 warning-count=379
-warning-sha256=24c7edb4b89054d6d1ead97515fd916fe87caebce757f04b2eb8bd442eadc920
+warning-sha256=9cfea6d0e702a7788beae70562cc79c10bc100c7635c9b620a1ecdfe888074a2

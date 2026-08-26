@@ -74,9 +74,11 @@
             field explicitly. The API supplies no default profile, depth, name storage, or duplicate policy.</p>
           <p>The parser validates and freezes the profile during initialization. An unsupported or incompatible profile
             fails before input consumption. The writer applies the same rule before it begins a destination transaction.</p>
-          <p>The implemented strict profile combination accepts any JSON value at the top level. It rejects a BOM, malformed UTF-8,
-            unpaired surrogates, comments, trailing commas, nonstandard numbers, nonfinite values, and raw control
-            characters. A caller can instead require an object root.</p>
+          <p>The strict profile combination uses <a data-api="Flyology_JSON.Profiles.Compatibility_Family.No_Extensions"><code>No_Extensions</code></a>.
+            It rejects a BOM, malformed UTF-8, unpaired surrogates, comments, trailing commas, nonstandard numbers,
+            nonfinite values, and raw control characters. A caller can instead require an object root.</p>
+          <p>The other compatibility families accept comments, trailing commas, or both. Comments are validated UTF-8
+            trivia and produce no parser events. Each family enables only its named extension.</p>
         </section>
 
         <section id="parser">

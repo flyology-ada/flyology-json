@@ -29,6 +29,14 @@ package body Flyology_JSON.Parsing is
    function Root_Policy_Of (Value : Profiles.Top_Level_Policy) return Parser_Core.Root_Policy
    is (if Value = Profiles.Accept_Any_Value then Parser_Core.Accept_Any else Parser_Core.Require_Object);
 
+   function Compatibility_Of
+     (Value : Profiles.Compatibility_Family) return Parser_Core.Compatibility_Mode
+   is (case Value is
+         when Profiles.No_Extensions                => Parser_Core.No_Extensions,
+         when Profiles.Comments                     => Parser_Core.Comments,
+         when Profiles.Trailing_Commas              => Parser_Core.Trailing_Commas,
+         when Profiles.Comments_And_Trailing_Commas => Parser_Core.Comments_And_Trailing_Commas);
+
    function Map_Code (Value : Parser_Core.Error_Code) return Errors.Error_Code is
    begin
       return
@@ -228,7 +236,10 @@ package body Flyology_JSON.Parsing is
          return;
       end if;
 
-      Parser_Core.Initialize (Self.Core_Data, Root_Policy_Of (Profile.Top_Level));
+      Parser_Core.Initialize
+        (Self.Core_Data,
+         Root_Policy_Of (Profile.Top_Level),
+         Compatibility_Of (Profile.Compatibility.Family));
       Self.Current_State := Ready;
       Self.Has_Profile := True;
       Self.Applied_Profile_Data := Profile;
@@ -359,9 +370,15 @@ package body Flyology_JSON.Parsing is
       end if;
 
       if Self.Core_Initialized then
-         Parser_Core.Reset (Self.Core_Data, Root_Policy_Of (Profile.Top_Level));
+         Parser_Core.Reset
+           (Self.Core_Data,
+            Root_Policy_Of (Profile.Top_Level),
+            Compatibility_Of (Profile.Compatibility.Family));
       else
-         Parser_Core.Initialize (Self.Core_Data, Root_Policy_Of (Profile.Top_Level));
+         Parser_Core.Initialize
+           (Self.Core_Data,
+            Root_Policy_Of (Profile.Top_Level),
+            Compatibility_Of (Profile.Compatibility.Family));
          Self.Core_Initialized := True;
       end if;
 

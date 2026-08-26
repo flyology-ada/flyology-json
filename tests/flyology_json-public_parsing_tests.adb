@@ -21,6 +21,7 @@ procedure Flyology_JSON.Public_Parsing_Tests is
    use type Preserve_Parsing.Drain_Stop;
    use type Preserve_Parsing.Event_Kind;
    use type Preserve_Parsing.Step_Outcome;
+   use type Profiles.Compatibility_Family;
    use type Profiles.Duplicate_Policy;
    use type Strict_Parsing.Decoded_Fragment_Kind;
    use type Strict_Parsing.Drain_Stop;
@@ -56,13 +57,14 @@ procedure Flyology_JSON.Public_Parsing_Tests is
    end To_Input;
 
    function Profile
-     (Duplicates : Profiles.Duplicate_Policy;
-      Top_Level  : Profiles.Top_Level_Policy := Profiles.Accept_Any_Value)
+     (Duplicates    : Profiles.Duplicate_Policy;
+      Top_Level     : Profiles.Top_Level_Policy := Profiles.Accept_Any_Value;
+      Compatibility : Profiles.Compatibility_Family := Profiles.No_Extensions)
       return Profiles.Parser_Profile
    is
      (Syntax        => (Family => Profiles.RFC_8259, Version => 1),
       Unicode       => (Family => Profiles.Unicode_Scalars, Version => 1),
-      Compatibility => (Family => Profiles.No_Extensions, Version => 1),
+      Compatibility => (Family => Compatibility, Version => 1),
       BOM           => Profiles.Reject_BOM,
       Duplicates    => Duplicates,
       Top_Level     => Top_Level);
@@ -605,6 +607,114 @@ procedure Flyology_JSON.Public_Parsing_Tests is
          Expect_Inline  => True);
    end Check_One_Byte_Transport;
 
+   procedure Check_Compatibility_Modes is
+      procedure Run
+        (Family        : Profiles.Compatibility_Family;
+         Text          : String;
+         Should_Accept : Boolean;
+         Failure_Code  : Errors.Error_Code := Errors.No_Error)
+      is
+         Subject    : Strict_Parsing.Parser (4, 32, 8);
+         Input      : constant Ada.Streams.Stream_Element_Array := To_Input (Text, -19);
+         Result     : Strict_Parsing.Step_Result;
+         Diagnostic : Errors.Diagnostic;
+         Used       : Count := 0;
+      begin
+         Strict_Parsing.Initialize
+           (Subject,
+            Profile (Profiles.Reject_Duplicates, Compatibility => Family),
+            Diagnostic);
+         Check (Diagnostic.Code = Errors.No_Error, "compatibility profile initialization failed");
+         Check
+           (Strict_Parsing.Applied_Profile (Subject).Compatibility.Family = Family,
+            "applied compatibility identity changed");
+
+         for Attempt in 1 .. Maximum_Steps loop
+            declare
+               First : constant Offset := Input'First + Offset (Used);
+            begin
+               if Used < Input'Length then
+                  Strict_Parsing.Step (Subject, Input (First .. Input'Last), True, Result);
+               else
+                  declare
+                     Empty : constant Ada.Streams.Stream_Element_Array (First .. First - 1) :=
+                       [others => 0];
+                  begin
+                     Strict_Parsing.Step (Subject, Empty, True, Result);
+                  end;
+               end if;
+            end;
+
+            Used := Used + Result.Consumed;
+            if Result.Outcome = Strict_Parsing.Event_Ready
+              and then Family = Profiles.Comments
+              and then Text = "/*x*/0"
+              and then Strict_Parsing.Kind (Result.Item) = Strict_Parsing.Number_Fragment
+            then
+               Check
+                 (Strict_Parsing.Source (Result.Item).First = 5,
+                  "skipped comment octets were omitted from absolute source coordinates");
+            end if;
+            exit when Result.Outcome in Strict_Parsing.Document_Complete | Strict_Parsing.Step_Failed;
+            Check
+              (Result.Outcome = Strict_Parsing.Event_Ready,
+               "compatibility Step stopped before a terminal result");
+            pragma Assert (Attempt < Maximum_Steps);
+         end loop;
+
+         if Should_Accept then
+            Check
+              (Result.Outcome = Strict_Parsing.Document_Complete,
+               "selected compatibility mode rejected its input");
+            Check (Used = Input'Length, "compatible parse did not consume all input");
+         else
+            Check (Result.Outcome = Strict_Parsing.Step_Failed, "compatibility isolation accepted input");
+            Check (Result.Diagnostic.Code = Failure_Code, "compatibility isolation changed diagnostic");
+         end if;
+      end Run;
+   begin
+      Run (Profiles.Comments, "/*x*/0", True);
+      Run (Profiles.Trailing_Commas, "[0,]", True);
+      Run (Profiles.Comments_And_Trailing_Commas, "[0,/*x*/]", True);
+      Run (Profiles.No_Extensions, "/*x*/0", False, Errors.Unexpected_Token);
+      Run (Profiles.No_Extensions, "[0,]", False, Errors.Unexpected_Token);
+      Run (Profiles.Comments, "[0,]", False, Errors.Unexpected_Token);
+      Run (Profiles.Trailing_Commas, "/*x*/0", False, Errors.Unexpected_Token);
+
+      declare
+         Subject    : Strict_Parsing.Parser (1, 0, 0);
+         Input      : constant Ada.Streams.Stream_Element_Array := To_Input ("/*open", 41);
+         Result     : Strict_Parsing.Step_Result;
+         Diagnostic : Errors.Diagnostic;
+      begin
+         Strict_Parsing.Initialize
+           (Subject,
+            Profile (Profiles.Reject_Duplicates, Compatibility => Profiles.Comments),
+            Diagnostic);
+         Strict_Parsing.Step (Subject, Input, False, Result);
+         Check
+           (Result.Outcome = Strict_Parsing.Event_Ready
+            and then Strict_Parsing.Kind (Result.Item) = Strict_Parsing.Document_Begin,
+            "comment operation omitted document begin");
+         Strict_Parsing.Step (Subject, Input, False, Result);
+         Check
+           (Result.Outcome = Strict_Parsing.Need_Input and then Result.Consumed = Input'Length,
+            "split block comment did not retain resumable trivia state");
+         Strict_Parsing.Abort_Document (Subject);
+         Check
+           (Strict_Parsing.State (Subject) = Strict_Parsing.Aborted,
+            "comment abort did not seal operation");
+         Strict_Parsing.Reset
+           (Subject,
+            Profile (Profiles.Reject_Duplicates, Compatibility => Profiles.Trailing_Commas),
+            Diagnostic);
+         Check (Diagnostic.Code = Errors.No_Error, "compatibility reset failed");
+         Check
+           (Strict_Parsing.Applied_Profile (Subject).Compatibility.Family = Profiles.Trailing_Commas,
+            "compatibility reset retained the prior family");
+      end;
+   end Check_Compatibility_Modes;
+
    procedure Check_Policies_And_Failures is
       Preserve         : Preserve_Parsing.Parser (2, 0, 0);
       Preserve_Drained : Preserve_Parsing.Parser (2, 0, 0);
@@ -907,5 +1017,6 @@ begin
    Check_Drain_Finality_And_Null_Precedence;
    Check_No_Copy_Pipeline;
    Check_One_Byte_Transport;
+   Check_Compatibility_Modes;
    Check_Policies_And_Failures;
 end Flyology_JSON.Public_Parsing_Tests;

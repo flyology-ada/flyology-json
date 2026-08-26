@@ -19,6 +19,14 @@ private package Flyology_JSON.Parser_Core is
 
    type Root_Policy is (Accept_Any, Require_Object);
 
+   --  Resolved compatibility policy used by the private parser engine.
+   --  @enum No_Extensions Accept only RFC JSON syntax.
+   --  @enum Comments Also accept line and non-nested block comments as trivia.
+   --  @enum Trailing_Commas Also accept a trailing comma in a nonempty container.
+   --  @enum Comments_And_Trailing_Commas Accept both documented extensions.
+   type Compatibility_Mode is
+     (No_Extensions, Comments, Trailing_Commas, Comments_And_Trailing_Commas);
+
    type Parser_State is (Uninitialized, Ready, Active, Failure_Pending, Completed, Failed, Aborted);
 
    type Event_Kind is
@@ -145,6 +153,13 @@ private package Flyology_JSON.Parser_Core is
    --  occurs before consuming the first non-whitespace root octet.
    procedure Initialize (Self : in out Parser; Top_Level : Root_Policy);
 
+   --  Freeze both root and nonstandard-input policies for this operation.
+   --  @param Self Parser whose operation is initialized.
+   --  @param Top_Level Required root shape.
+   --  @param Compatibility Exact extension family admitted by the operation.
+   procedure Initialize
+     (Self : in out Parser; Top_Level : Root_Policy; Compatibility : Compatibility_Mode);
+
    --  Return exactly one event, Need_Input, completion, or failure.  Consumed
    --  is always a count from Input'First and never an Ada array index.  Item is
    --  meaningful only for Event_Ready.  A raw slice is borrowed from this
@@ -266,6 +281,14 @@ private package Flyology_JSON.Parser_Core is
    --  state it is a nonraising no-op.
    procedure Reset (Self : in out Parser; Top_Level : Root_Policy);
 
+   --  Start a new operation with explicitly selected root and extension
+   --  policies after a terminal parser state.
+   --  @param Self Parser whose terminal operation is discarded.
+   --  @param Top_Level Required root shape for the new operation.
+   --  @param Compatibility Exact extension family for the new operation.
+   procedure Reset
+     (Self : in out Parser; Top_Level : Root_Policy; Compatibility : Compatibility_Mode);
+
    function State (Self : Parser) return Parser_State;
 
    function Terminal_Diagnostic (Self : Parser) return Diagnostic
@@ -308,36 +331,43 @@ private
    type Text_Scan_State is
      (Text_Content, Text_After_Escape, Text_Unicode_Digits, Text_Low_Backslash, Text_Low_U, Text_Low_Digits);
 
+   type Trivia_State is
+     (No_Comment, Comment_Opening, Line_Comment, Block_Comment, Block_After_Star);
+
    type Parser
      (Maximum_Depth       : Natural;
       Name_Octet_Capacity : Natural;
       Name_Capacity       : Natural;
       Duplicate_Handling  : Duplicate_Mode)
    is limited record
-      Current_State       : Parser_State := Uninitialized;
-      Last_Diagnostic     : Diagnostic := (Code => No_Error, Offset => 0);
-      Next_Offset         : Byte_Offset := 0;
-      Depth               : Natural := 0;
-      Stack               : Phase_Array (1 .. Maximum_Depth);
-      Applied_Root_Policy : Root_Policy := Accept_Any;
-      Final_Input_Seen    : Boolean := False;
-      Root_Started        : Boolean := False;
-      Root_Complete       : Boolean := False;
-      Document_End_Sent   : Boolean := False;
-      Token               : Token_Kind := No_Token;
-      Token_Start         : Byte_Offset := 0;
-      Number              : Parser_Numbers.Number_State;
-      UTF8                : Parser_UTF8.Decoder;
-      UTF8_Lead_Offset    : Byte_Offset := 0;
-      Text_State          : Text_Scan_State := Text_Content;
-      Text_Escape_Start   : Byte_Offset := 0;
-      Text_High_Start     : Byte_Offset := 0;
-      Text_Hex_Value      : Interfaces.Unsigned_32 := 0;
-      Text_Hex_Digits     : Natural range 0 .. 4 := 0;
-      Text_High_Surrogate : Interfaces.Unsigned_32 := 0;
-      Literal_Position    : Natural := 0;
-      Literal_Can_Slice   : Boolean := False;
-      Literal_First_Count : Ada.Streams.Stream_Element_Count := 0;
+      Current_State         : Parser_State := Uninitialized;
+      Last_Diagnostic       : Diagnostic := (Code => No_Error, Offset => 0);
+      Next_Offset           : Byte_Offset := 0;
+      Depth                 : Natural := 0;
+      Stack                 : Phase_Array (1 .. Maximum_Depth);
+      Applied_Root_Policy   : Root_Policy := Accept_Any;
+      Applied_Compatibility : Compatibility_Mode := No_Extensions;
+      Final_Input_Seen      : Boolean := False;
+      Root_Started          : Boolean := False;
+      Root_Complete         : Boolean := False;
+      Document_End_Sent     : Boolean := False;
+      Token                 : Token_Kind := No_Token;
+      Token_Start           : Byte_Offset := 0;
+      Number                : Parser_Numbers.Number_State;
+      --  Text tokens and comments cannot overlap.  They therefore share one
+      --  decoder, avoiding comment-only state in every strict parser object.
+      UTF8                  : Parser_UTF8.Decoder;
+      UTF8_Lead_Offset      : Byte_Offset := 0;
+      Trivia                : Trivia_State := No_Comment;
+      Text_State            : Text_Scan_State := Text_Content;
+      Text_Escape_Start     : Byte_Offset := 0;
+      Text_High_Start       : Byte_Offset := 0;
+      Text_Hex_Value        : Interfaces.Unsigned_32 := 0;
+      Text_Hex_Digits       : Natural range 0 .. 4 := 0;
+      Text_High_Surrogate   : Interfaces.Unsigned_32 := 0;
+      Literal_Position      : Natural := 0;
+      Literal_Can_Slice     : Boolean := False;
+      Literal_First_Count   : Ada.Streams.Stream_Element_Count := 0;
       case Duplicate_Handling is
          when Reject_Duplicates  =>
             Duplicate_Names    : Parser_Duplicates.Index (Name_Octet_Capacity, Name_Capacity);

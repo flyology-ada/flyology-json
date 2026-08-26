@@ -22,7 +22,9 @@ alr build
 
 - `Flyology_JSON.Parsing`: caller-driven `Step` and batched `Drain`, explicit
   profiles and capacities, provisional events, exact raw number/source ranges,
-  strict decoded-name duplicate rejection or unchecked preservation.
+  strict decoded-name duplicate rejection or unchecked preservation. Explicit
+  compatibility families can accept comments, trailing commas, or both without
+  enabling other token extensions.
 - `Flyology_JSON.Tokens`: bounded caller-storage token collection.
 - `Flyology_JSON.Numbers.Signed_Integers` and `.Unsigned_Integers`: checked
   exact-lexeme conversion without normalization or hidden allocation.

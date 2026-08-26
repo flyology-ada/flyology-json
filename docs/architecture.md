@@ -46,13 +46,19 @@ names do not contain `_V1`; each versioned family carries an explicit positive
 numeric version. The initial implementation accepts version 1 and rejects
 unknown/incompatible profiles before byte zero or destination begin.
 
-The initial strict parser is RFC 8259 JSON over UTF-8 Unicode scalar values. It
-rejects BOMs, malformed UTF-8, unpaired surrogate escapes, raw controls,
-comments, trailing commas, nonstandard/nonfinite numbers, and (when selected)
-decoded-name duplicates. Top-level scalars and object-only roots are distinct
-explicit policies. Object-only parsing rejects a recognized non-object root
-leader before consuming it or validating the remainder of that token; a byte
-that cannot lead any JSON value remains a syntax error.
+The strict parser is RFC 8259 JSON over UTF-8 Unicode scalar values. With
+`No_Extensions`, it rejects BOMs, malformed UTF-8, unpaired surrogate escapes,
+raw controls, comments, trailing commas, nonstandard/nonfinite numbers, and
+(when selected) decoded-name duplicates. The explicit `Comments`,
+`Trailing_Commas`, and `Comments_And_Trailing_Commas` compatibility families
+select only their named extensions. Comments use non-nested `//` and `/* */`
+syntax where JSON whitespace is legal. The parser validates comment text as
+UTF-8 and skips it without emitting events. A trailing comma is accepted only
+after at least one array item or object member. Top-level scalars and
+object-only roots are distinct explicit policies. Object-only parsing rejects
+a recognized non-object root leader before consuming it or validating the
+remainder of that token; a byte that cannot lead any JSON value remains a
+syntax error.
 
 The ordinary compact writer emits UTF-8, no BOM or added whitespace, caller
 member order, exact validated number lexemes, direct solidus/non-ASCII, short
