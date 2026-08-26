@@ -127,3 +127,18 @@ important pre-milestone quality, documentation, or performance defect.
 The final self-review sweep found no remaining actionable P0, P1, or P2 in
 this compatibility milestone. Consumer review of the exact pushed declaration
 commit remains required before the indexed development origin is replaced.
+
+### Post-push generated-instruction repair
+
+The first Agent Resources run on pushed head `dc05a7e` found a P1 in the local
+APM reproduction evidence. APM scans ignored build trees; the local SIMD spike
+cache retained an unrelated Flyology checkout whose allocator instruction
+packages were consequently placed in the root generated `AGENTS.md`. A clean
+CI checkout did not contain those ignored artifacts and generated the correct
+eight-pattern instruction set, so the committed aggregate did not reproduce.
+
+The ignored, reproducible benchmark cache was moved out of the checkout and a
+single serialized `apm compile --target codex` regenerated the same build ID
+and instruction set as clean CI. No APM source package or lock changed. The
+repair removes only the unrelated generated scopes; parser source and the
+reviewed compatibility declarations are unchanged.
