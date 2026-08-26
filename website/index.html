@@ -77,19 +77,16 @@
         <div class="json-code-pair" aria-label="Public Ada API examples">
           <div class="code-window json-code-window">
             <div class="code-titlebar"><div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div><span>landing_samples.adb · parser</span></div>
-            <pre><code class="language-ada" data-example-source="examples/landing_samples.adb" data-example-region="landing-parser">   Parsing.Drain
-     (Self         =&gt; Parser,
-      Input        =&gt; Chunk,
-      End_Of_Input =&gt; True,
-      Events       =&gt; Events,
-      Result       =&gt; Result);
+            <pre><code class="language-ada" data-example-source="examples/landing_samples.adb" data-example-region="landing-parser">   --  The chunk is the complete input, so End_Of_Input is true. Drain can
+   --  return several events through one public call.
+   Parsing.Drain (Self =&gt; Parser, Input =&gt; Chunk, End_Of_Input =&gt; True, Events =&gt; Events, Result =&gt; Result);
 </code></pre>
           </div>
           <div class="code-window json-code-window json-code-window-number">
             <div class="code-titlebar"><div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div><span>landing_samples.adb · integer</span></div>
-            <pre><code class="language-ada" data-example-source="examples/landing_samples.adb" data-example-region="landing-number">   Unsigned_64_JSON.Parse
-     (Lexeme =&gt; Number,
-      Result =&gt; Number_Result);
+            <pre><code class="language-ada" data-example-source="examples/landing_samples.adb" data-example-region="landing-number">   --  Numeric conversion is separate from parsing. Parse checks the exact
+   --  lexeme and the target range without rounding or modular wraparound.
+   Unsigned_64_JSON.Parse (Lexeme =&gt; Number, Result =&gt; Number_Result);
 </code></pre>
           </div>
         </div>

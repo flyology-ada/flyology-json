@@ -25,6 +25,8 @@
           <h2>Parse one complete value</h2>
           <p>Flyology JSON has no default profile or capacity. This complete strict scalar example sets each value explicitly, initializes the parser, and checks complete-document acceptance.</p>
           <pre><code class="language-ada" data-example-source="examples/landing_samples.adb" data-example-region="quick-start-parser">   declare
+      --  A parser profile is always complete and explicit. This one selects
+      --  strict RFC JSON, Unicode scalar validation, and duplicate rejection.
       Quick_Profile : constant Profiles.Parser_Profile :=
         (Syntax        =&gt; (Family =&gt; Profiles.RFC_8259, Version =&gt; 1),
          Unicode       =&gt; (Family =&gt; Profiles.Unicode_Scalars, Version =&gt; 1),
@@ -32,27 +34,35 @@
          BOM           =&gt; Profiles.Reject_BOM,
          Duplicates    =&gt; Profiles.Reject_Duplicates,
          Top_Level     =&gt; Profiles.Accept_Any_Value);
-      Quick_Parser : Parsing.Parser
-        (Maximum_Depth       =&gt; 0,
-         Name_Octet_Capacity =&gt; 0,
-         Name_Capacity       =&gt; 0);
-      Input : constant Ada.Streams.Stream_Element_Array :=
+
+      --  The input is the scalar `null`, so it opens no containers and has no
+      --  member names. Zero is therefore sufficient for all three capacities
+      --  in this example; these values are not library defaults.
+      Quick_Parser     : Parsing.Parser (Maximum_Depth =&gt; 0, Name_Octet_Capacity =&gt; 0, Name_Capacity =&gt; 0);
+      Input            : constant Ada.Streams.Stream_Element_Array :=
         [Character'Pos ('n'), Character'Pos ('u'), Character'Pos ('l'), Character'Pos ('l')];
       Quick_Events     : Parsing.Event_Array (1 .. 4);
       Quick_Result     : Parsing.Drain_Result;
       Quick_Diagnostic : Errors.Diagnostic;
    begin
+      --  Initialize validates and freezes the profile before byte zero. It
+      --  reports configuration failure through Diagnostic rather than raising.
       Parsing.Initialize (Quick_Parser, Quick_Profile, Quick_Diagnostic);
       if Quick_Diagnostic.Code /= Errors.No_Error then
          raise Program_Error with "parser initialization failed";
       end if;
 
+      --  Drain consumes the final input chunk and batches provisional events
+      --  into caller storage. The result is separate from the event array.
       Parsing.Drain
         (Self         =&gt; Quick_Parser,
          Input        =&gt; Input,
          End_Of_Input =&gt; True,
          Events       =&gt; Quick_Events,
          Result       =&gt; Quick_Result);
+
+      --  Only Drain_Document_Complete accepts the whole document. An
+      --  application can commit its own candidate value after this outcome.
       if Quick_Result.Stop /= Parsing.Drain_Document_Complete then
          raise Program_Error with "JSON document was not accepted";
       end if;

@@ -73,6 +73,7 @@ cat "$gnatdoc_log"
 node "$project_root/scripts/check-gnatdoc-diagnostics.mjs" \
   "$gnatdoc_log" \
   "$project_root/docs/gnatdoc-diagnostics.txt" \
+  "$project_root/docs/gnatdoc-public-units.txt" \
   "$project_root"
 rm -f "$gnatdoc_log"
 trap - EXIT HUP INT TERM

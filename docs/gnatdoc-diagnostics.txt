@@ -1,5 +1,6 @@
 # SHA-256 attestation of the sorted, normalized warning lines emitted by
-# GNATdoc 26.0.0. Omitted declarations, if any, are listed as exact omission
-# records below these two fields.
-warning-count=771
-warning-sha256=c9e1a947a6eb1506fd5e6fdfd3f7de30f6556847863a8866f0e6c4cc03250931
+# GNATdoc 26.0.0. Installed public units must contribute zero warnings; their
+# allowlist is docs/gnatdoc-public-units.txt. Omitted declarations, if any, are
+# listed as exact omission records below these two fields.
+warning-count=379
+warning-sha256=24c7edb4b89054d6d1ead97515fd916fe87caebce757f04b2eb8bd442eadc920

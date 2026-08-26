@@ -4,18 +4,19 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-if (process.argv.length !== 5) {
+if (process.argv.length !== 6) {
   console.error(
     "usage: node scripts/check-gnatdoc-diagnostics.mjs " +
-      "<log> <expected-diagnostics> <project-root>",
+      "<log> <expected-diagnostics> <public-units> <project-root>",
   );
   process.exit(2);
 }
 
-const [logPath, expectedPath, projectRootArgument] = process.argv.slice(2);
+const [logPath, expectedPath, publicUnitsPath, projectRootArgument] = process.argv.slice(2);
 const projectRoot = resolve(projectRootArgument);
 const log = (await readFile(logPath, "utf8")).replaceAll("\r\n", "\n");
 const expectedSource = (await readFile(expectedPath, "utf8")).replaceAll("\r\n", "\n");
+const publicUnitsSource = (await readFile(publicUnitsPath, "utf8")).replaceAll("\r\n", "\n");
 
 function normalize(value) {
   return value
@@ -25,12 +26,25 @@ function normalize(value) {
 }
 
 const warnings = [];
+const publicWarnings = [];
 const omissions = [];
+const publicSourceNames = new Set(
+  publicUnitsSource
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"))
+    .map((unitName) => `${unitName.toLowerCase().replaceAll(".", "-")}.ads`),
+);
 const lines = log.split("\n");
 for (let index = 0; index < lines.length; index += 1) {
   const line = lines[index];
   if (/warning:/i.test(line)) {
-    warnings.push("warning\t" + normalize(line));
+    const normalizedLine = normalize(line);
+    warnings.push("warning\t" + normalizedLine);
+    const sourceName = normalizedLine.match(/(?:^|\/)([^/:]+\.ads):\d+:\d+: warning:/i)?.[1];
+    if (sourceName && publicSourceNames.has(sourceName.toLowerCase())) {
+      publicWarnings.push(normalizedLine);
+    }
   }
 
   if (/raised GNATDOC\.[A-Z_]+/.test(line)) {
@@ -40,6 +54,12 @@ for (let index = 0; index < lines.length; index += 1) {
     console.error("GNATdoc reported an internal error: " + normalize(line));
     process.exit(1);
   }
+}
+
+if (publicWarnings.length !== 0) {
+  console.error("GNATdoc reported undocumented entities in installed public units:");
+  for (const warning of publicWarnings) console.error(`  ${warning}`);
+  process.exit(1);
 }
 
 const expectedLines = expectedSource
@@ -84,5 +104,5 @@ if (JSON.stringify(omissions) !== JSON.stringify(expectedOmissions)) {
 
 console.log(
   `GNATdoc diagnostics match exactly: ${warnings.length} warning(s), ` +
-    `${omissions.length} reviewed omission(s).`,
+    `${omissions.length} reviewed omission(s), 0 public warning(s).`,
 );

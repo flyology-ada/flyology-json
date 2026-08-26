@@ -37,11 +37,16 @@
         <section id="calls">
           <h2>Write one balanced root value</h2>
           <p><a data-api="Flyology_JSON.Writing.Begin_Document"><code>Begin_Document</code></a> opens the transaction. JSON calls then describe exactly one balanced root. <a data-api="Flyology_JSON.Writing.Finish_Document"><code>Finish_Document</code></a> validates the end state and requests commit.</p>
-          <pre><code class="language-ada" data-example-source="examples/transactional_writer.adb" data-example-region="writer-calls">   Writing.Initialize (Writer, Profile, Diagnostic);
+          <pre><code class="language-ada" data-example-source="examples/transactional_writer.adb" data-example-region="writer-calls">   --  Initialize validates and freezes Ordinary_Compact before Begin can ask
+   --  the destination to own a transaction.
+   Writing.Initialize (Writer, Profile, Diagnostic);
    Require_Success (Diagnostic, "Initialize");
 
    Writing.Begin_Document (Writer, Diagnostic);
    Require_Success (Diagnostic, "Begin_Document");
+
+   --  Semantic calls mirror the JSON grammar. The writer adds punctuation,
+   --  validates UTF-8, and escapes decoded name and string fragments.
    Writing.Begin_Object (Writer, Diagnostic);
    Require_Success (Diagnostic, "Begin_Object");
    Writing.Begin_Name (Writer, Diagnostic);
@@ -64,6 +69,8 @@
       raise Program_Error with "the destination published before commit";
    end if;
 
+   --  Finish validates the balanced root and invokes Commit. A failed commit
+   --  would publish nothing and retain the primary diagnostic for cleanup.
    Writing.Finish_Document (Writer, Diagnostic);
    Require_Success (Diagnostic, "Finish_Document");
 </code></pre>
