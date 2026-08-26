@@ -1,3 +1,6 @@
+--  Superseded architecture-review snapshot.  This file is not an installed or
+--  maintained API mirror; use src/flyology_json-profiles.ads as the authority.
+
 --  Independently versioned JSON syntax, Unicode, compatibility, duplicate,
 --  root, and output identities for the trusted surface.
 

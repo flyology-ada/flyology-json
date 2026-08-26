@@ -117,7 +117,7 @@ package Flyology_JSON.Parsing is
    --             Object_End
    --    array  = Array_Begin, value*, Array_End
    --    string = String_Begin, String_Fragment*, String_End
-   --    number = Number_Begin, Number_Fragment*, Number_End
+   --    number = Number_Begin, Number_Fragment+, Number_End
    --
    --  Events never imply container lengths or Serde semantics.  Every event is
    --  provisional until Document_Complete.  Number fragments preserve exact
