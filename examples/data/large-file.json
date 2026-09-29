@@ -1,0 +1,6 @@
+{
+  "source": "maintained example",
+  "readings": [0, 12.5, -7, 18446744073709551615],
+  "message": "escaped euro: \u20AC; this string crosses several input windows",
+  "ok": true
+}

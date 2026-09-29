@@ -19,11 +19,12 @@
   <main id="main">
     <section class="guide-hero page-shell"><span class="eyebrow">Guide · Parsing</span><h1>Incremental parsing</h1><p>The parser accepts any chunk schedule. It retains lexical and structural state, but it never retains a reference to the caller's input array.</p></section>
     <div class="guide-layout page-shell">
-      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#first-parser">Parse one value</a></li><li><a href="#choose-shape">Choose a static duplicate policy</a></li><li><a href="#configure-storage">Configure storage</a></li><li><a href="#drive">Drive the parser</a></li><li><a href="#events">Read events</a></li><li><a href="#ranges">Resolve raw ranges</a></li><li><a href="#complete">Accept or abort</a></li></ol></aside>
+      <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ol><li><a href="#first-parser">Parse one value</a></li><li><a href="#large-file">Parse a large file</a></li><li><a href="#choose-shape">Choose a static duplicate policy</a></li><li><a href="#configure-storage">Configure storage</a></li><li><a href="#drive">Drive the parser</a></li><li><a href="#events">Read events</a></li><li><a href="#ranges">Resolve raw ranges</a></li><li><a href="#complete">Accept or abort</a></li></ol></aside>
       <article class="prose">
         <section id="first-parser">
           <h2>Parse one complete value</h2>
-          <p>Flyology JSON has no default profile or capacity. This complete strict scalar example sets each value explicitly, initializes the parser, and checks complete-document acceptance.</p>
+          <p>Flyology JSON has no default profile or capacity. This strict scalar example sets each value explicitly and selects <a data-api="Flyology_JSON.Profiles.Reject_Duplicates"><code>Reject_Duplicates</code></a>.</p>
+          <p>The example calls <a data-api="Flyology_JSON.Parsing.Drain"><code>Drain</code></a> with <a data-api="Flyology_JSON.Parsing.Drain.End_Of_Input"><code>End_Of_Input</code></a> set to true. It accepts the document only after <a data-api="Flyology_JSON.Parsing.Drain_Stop.Drain_Document_Complete"><code>Drain_Document_Complete</code></a>.</p>
           <pre><code class="language-ada" data-example-source="examples/landing_samples.adb" data-example-region="quick-start-parser">   declare
       --  A parser profile is always complete and explicit. This one selects
       --  strict RFC JSON, Unicode scalar validation, and duplicate rejection.
@@ -71,11 +72,216 @@
           <p>Run the complete examples with <code>./scripts/test-examples.sh</code>. The maintained <code>streaming_parser.adb</code> source contains the complete arbitrary-chunk loop.</p>
         </section>
 
+        <section id="large-file" class="large-file-chapter">
+          <h2>Parse a large file with fixed storage</h2>
+          <p>Read the file through <code>Ada.Streams.Stream_IO</code> into a fixed input array. File size does not change the input buffer, the event buffer, or the parser capacities.</p>
+          <p>The maintained example selects <a data-api="Flyology_JSON.Profiles.Preserve_Unchecked"><code>Preserve_Unchecked</code></a> and sets both duplicate-name capacities to zero. The small buffers force input and event boundaries. These example values are not library defaults or production recommendations.</p>
+          <ol class="sequence large-file-sequence" aria-label="Large-file parser control loop"><li><strong>1. Read</strong><span>Fill one fixed input window.</span></li><li><strong>2. Drain</strong><span>Consume the current suffix and publish a bounded event batch.</span></li><li><strong>3. Handle</strong><span>Use borrowed fragments before the next read.</span></li><li><strong>4. Branch on stop</strong><span>Use <code>Result.Stop</code> to drain again, refill the buffer, commit, or report failure.</span></li></ol>
+          <figure class="code-panel large-file-code">
+            <figcaption>Profile and fixed storage</figcaption>
+            <button class="copy-button" type="button" data-copy aria-label="Copy profile and storage example">Copy</button>
+            <pre><code class="language-ada" data-example-source="examples/large_file_parser.adb" data-example-region="large-file-setup">   --  This profile accepts each decoded member name in source order. It does
+   --  not detect or select among duplicate names.
+   Profile : constant Profiles.Parser_Profile :=
+     (Syntax        =&gt; (Family =&gt; Profiles.RFC_8259, Version =&gt; 1),
+      Unicode       =&gt; (Family =&gt; Profiles.Unicode_Scalars, Version =&gt; 1),
+      Compatibility =&gt; (Family =&gt; Profiles.No_Extensions, Version =&gt; 1),
+      BOM           =&gt; Profiles.Reject_BOM,
+      Duplicates    =&gt; Profiles.Preserve_Unchecked,
+      Top_Level     =&gt; Profiles.Accept_Any_Value);
+
+   --  Both buffer lengths and all three parser capacities are application
+   --  choices. They are deliberately small so the maintained fixtures cross
+   --  boundaries. They are not library defaults or recommendations.
+   Input_Buffer : Ada.Streams.Stream_Element_Array (1 .. 32);
+   Events       : Parsing.Event_Array (1 .. 8);
+   Parser       : Parsing.Parser
+     (Maximum_Depth       =&gt; 2,
+      Name_Octet_Capacity =&gt; 0,
+      Name_Capacity       =&gt; 0);
+</code></pre>
+          </figure>
+          <div class="callout callout-teal"><div class="callout-symbol">!</div><div class="callout-body"><p class="callout-lede">Strict duplicate rejection changes the storage bound.</p><table class="callout-table"><thead><tr><th>Capacity</th><th>Exact bound</th></tr></thead><tbody><tr><td><a data-api="Flyology_JSON.Parsing.Parser.Name_Octet_Capacity"><code>Name_Octet_Capacity</code></a></td><td>Decoded UTF-8 octets for unique names across all open objects, plus the active candidate.</td></tr><tr><td><a data-api="Flyology_JSON.Parsing.Parser.Name_Capacity"><code>Name_Capacity</code></a></td><td>Crit-bit leaves and internal nodes retained across all open objects.</td></tr></tbody></table><p class="callout-note">A large flat object can require storage proportional to its member names.</p></div></div>
+          <h3>Handle raw ranges before the next read</h3>
+          <p>Handle each event batch before the next file read. A raw range borrows from the exact unchanged input actual of the call that produced the event. Inspect or copy the range before you overwrite the input buffer.</p>
+          <p><a data-api="Flyology_JSON.Parsing.Resolve_Raw_Range"><code>Resolve_Raw_Range</code></a> writes a caller-owned <a data-api="Flyology_JSON.Parsing.Chunk_Range"><code>Chunk_Range</code></a> and returns a <a data-api="Flyology_JSON.Parsing.Slice_Status"><code>Slice_Status</code></a>. Read the range only when the status is <a data-api="Flyology_JSON.Parsing.Slice_Status.Slice_Resolved"><code>Slice_Resolved</code></a>. Use the range counts to slice the unchanged input array.</p>
+          <p>Decoded text has two representations. Unescaped UTF-8 can borrow a raw range. Escapes and surrogate pairs carry one decoded UTF-8 scalar inside the event. Number fragments always identify exact source octets.</p>
+          <details class="code-foldout">
+            <summary>Show the fragment-counting handler</summary>
+            <figure class="code-panel large-file-code">
+              <figcaption>Count raw ranges and inline decoded scalars</figcaption>
+              <button class="copy-button" type="button" data-copy aria-label="Copy fragment handler">Copy</button>
+              <pre><code class="language-ada" data-example-source="examples/large_file_parser.adb" data-example-region="large-file-events">   --  Resolve one raw fragment while the exact producing input window is
+   --  still unchanged. A consumer that retains Fragment must copy it here.
+   procedure Count_Raw_Fragment
+     (Item   : Parsing.Event;
+      Input  : Ada.Streams.Stream_Element_Array;
+      Origin : Errors.Byte_Offset;
+      Total  : in out Errors.Byte_Offset)
+   is
+      Slice  : Parsing.Chunk_Range;
+      Status : Parsing.Slice_Status;
+   begin
+      Parsing.Resolve_Raw_Range (Item, Origin, Input'Length, Slice, Status);
+      if Status /= Parsing.Slice_Resolved then
+         raise Program_Error with "expected a raw range in the producing input window";
+      end if;
+
+      if Slice.Octet_Length &gt; 0 then
+         declare
+            First    : constant Offset := Input'First + Offset (Slice.First_Count);
+            Last     : constant Offset := First + Offset (Slice.Octet_Length) - 1;
+            Fragment : Ada.Streams.Stream_Element_Array renames Input (First .. Last);
+         begin
+            Total := Total + Errors.Byte_Offset (Fragment'Length);
+         end;
+      end if;
+   end Count_Raw_Fragment;
+
+   procedure Handle_Events
+     (Input    : Ada.Streams.Stream_Element_Array;
+      Origin   : Errors.Byte_Offset;
+      Items    : Parsing.Event_Array;
+      Produced : Count)
+   is
+   begin
+      if Produced = 0 then
+         return;
+      end if;
+
+      for Published in Count range 0 .. Produced - 1 loop
+         declare
+            Item : Parsing.Event renames Items (Items'First + Offset (Published));
+         begin
+            case Parsing.Kind (Item) is
+               when Parsing.Name_Fragment | Parsing.String_Fragment =&gt;
+                  --  Unescaped UTF-8 can borrow the current input. An escape
+                  --  or surrogate pair carries one decoded scalar inline.
+                  case Parsing.Decoded_Kind (Item) is
+                     when Parsing.Decoded_Is_Raw_Range =&gt;
+                        Count_Raw_Fragment (Item, Input, Origin, Decoded_Octets);
+
+                     when Parsing.Decoded_Inline_Scalar =&gt;
+                        declare
+                           Scalar : constant Parsing.Inline_Scalar := Parsing.Decoded_Scalar (Item);
+                        begin
+                           Decoded_Octets := Decoded_Octets + Errors.Byte_Offset (Scalar.Length);
+                        end;
+
+                     when Parsing.No_Decoded_Fragment =&gt;
+                        null;
+                  end case;
+
+               when Parsing.Number_Fragment =&gt;
+                  --  Number fragments are exact source octets. If conversion
+                  --  is needed, perform it separately after bounded collection.
+                  Count_Raw_Fragment (Item, Input, Origin, Number_Octets);
+
+               when others =&gt;
+                  --  The application handles structure, literals, and token
+                  --  boundaries here. Container lengths are not precomputed.
+                  null;
+            end case;
+         end;
+      end loop;
+   end Handle_Events;
+</code></pre>
+            </figure>
+          </details>
+          <h3>Drain each input window completely</h3>
+          <p>One input window can require several parser calls. If the event array fills first, <a data-api="Flyology_JSON.Parsing.Drain_Stop.Output_Full"><code>Output_Full</code></a> reports a complete event batch. Call <code>Drain</code> again with the remaining suffix. The suffix can be null. Do not refill <code>Input_Buffer</code> yet.</p>
+          <p><a data-api="Flyology_JSON.Parsing.Drain_Result.Consumed"><code>Result.Consumed</code></a> is a count from <code>Input'First</code>. Add this count to <code>Used</code> to locate the next suffix. Do not treat the count as an Ada array index.</p>
+          <p>After the parser consumes the supplied octets, it can still have an event or terminal result to report. The example therefore permits a null suffix call with the same final-input value.</p>
+          <figure class="code-panel large-file-code">
+            <figcaption>Caller-driven file and drain loops</figcaption>
+            <button class="copy-button" type="button" data-copy aria-label="Copy file loop">Copy</button>
+            <pre><code class="language-ada" data-example-source="examples/large_file_parser.adb" data-example-region="large-file-loop">   File_Loop :
+   loop
+      declare
+         Last  : Offset;
+         Used  : Count := 0;
+         Final : Boolean;
+      begin
+         if Stream_IO.End_Of_File (File) then
+            --  A null final window is necessary for an empty file.
+            Last := Input_Buffer'First - 1;
+            Final := True;
+         else
+            Stream_IO.Read (File, Input_Buffer, Last);
+            Final := Stream_IO.End_Of_File (File);
+         end if;
+
+         Drain_Window :
+         loop
+            declare
+               --  Used is a count from Input_Buffer'First. Input is null if
+               --  Drain consumed the complete window but the parser still has
+               --  an event or terminal result to report. Input is also null
+               --  after a final read that exactly fills Input_Buffer.
+               Input : Ada.Streams.Stream_Element_Array renames
+                 Input_Buffer (Input_Buffer'First + Offset (Used) .. Last);
+            begin
+               Parsing.Drain
+                 (Self         =&gt; Parser,
+                  Input        =&gt; Input,
+                  End_Of_Input =&gt; Final,
+                  Events       =&gt; Events,
+                  Result       =&gt; Result);
+
+               --  Handle borrowed ranges before the next read can overwrite
+               --  Input_Buffer. Only the produced prefix of Events is valid.
+               Handle_Events (Input, Result.Input_Origin, Events, Result.Produced);
+            end;
+
+            Used := Used + Result.Consumed;
+            case Result.Stop is
+               when Parsing.Output_Full =&gt;
+                  --  Drain filled Events. Call Drain again with the remaining
+                  --  suffix, which can be null. Do not refill Input_Buffer yet.
+                  null;
+
+               when Parsing.Drain_Need_Input =&gt;
+                  --  Drain_Need_Input consumed this complete nonfinal window.
+                  if Final or else Used /= Count (Last - Input_Buffer'First + 1) then
+                     raise Program_Error with "invalid parser input request";
+                  end if;
+                  exit Drain_Window;
+
+               when Parsing.Drain_Document_Complete =&gt;
+                  --  Drain_Document_Complete is the only complete-document
+                  --  acceptance gate. Commit the provisional candidate now.
+                  Accepted := True;
+                  exit File_Loop;
+
+               when Parsing.Drain_Failed =&gt;
+                  raise Program_Error
+                    with "JSON parsing failed: " &amp; Errors.Error_Code'Image (Result.Diagnostic.Code)
+                    &amp; " at source byte" &amp; Errors.Byte_Offset'Image (Result.Diagnostic.Offset);
+
+               when Parsing.Drain_Rejected =&gt;
+                  raise Program_Error
+                    with "parser call was rejected: "
+                    &amp; Errors.Error_Code'Image (Result.Diagnostic.Code);
+            end case;
+         end loop Drain_Window;
+      end;
+   end loop File_Loop;
+</code></pre>
+          </figure>
+          <h3>Latch final input and commit once</h3>
+          <p>Set <code>End_Of_Input</code> only when no later file octet exists. After a call sets it to true, every later suffix call must keep it true.</p>
+          <p><a data-api="Flyology_JSON.Parsing.Drain_Stop.Drain_Need_Input"><code>Drain_Need_Input</code></a> means that the parser consumed the complete nonfinal window. Read the next input window only after that result.</p>
+          <p><code>Drain_Document_Complete</code> is the acceptance gate. Earlier events, including <a data-api="Flyology_JSON.Parsing.Event_Kind.Document_End"><code>Document_End</code></a>, remain provisional. Commit an application candidate only after complete-document acceptance. Abort or discard the candidate after malformed input or resource failure.</p>
+          <h3>Run the maintained example</h3>
+          <p>Use <code>./scripts/test-examples.sh</code> to build and run the maintained fixtures. The large-file fixture reports <code>accepted; decoded octets: 101; number octets: 27</code>.</p>
+          <p>After the script succeeds, run <code>examples/bin/large_file_parser examples/data/large-file.json</code>. Replace the fixture path with another JSON file as needed.</p>
+        </section>
+
         <section id="choose-shape">
           <h2>Choose a static duplicate policy</h2>
           <p>Instantiate <a data-api="Flyology_JSON.Parsing"><code>Flyology_JSON.Parsing</code></a> with one explicit duplicate policy. The generic has no default.</p>
-          <p><a data-api="Flyology_JSON.Profiles.Reject_Duplicates"><code>Reject_Duplicates</code></a> compares decoded UTF-8 names without normalization. It uses caller-backed name storage and a bounded crit-bit index. Detection occurs when the later name ends, and the diagnostic blames its opening quote.</p>
-          <p><a data-api="Flyology_JSON.Profiles.Preserve_Unchecked"><code>Preserve_Unchecked</code></a> emits every member in source order. It stores no duplicate-name state and does not choose a first or last value.</p>
+          <p><code>Reject_Duplicates</code> compares decoded UTF-8 names without normalization. It uses caller-backed name storage and a bounded crit-bit index. Detection occurs when the later name ends, and the diagnostic blames its opening quote.</p>
+          <p><code>Preserve_Unchecked</code> emits every member in source order. It stores no duplicate-name state and does not choose a first or last value.</p>
           <div class="callout callout-teal"><div class="callout-symbol">!</div><div class="callout-body"><p class="callout-lede">Duplicate JSON names and application aliases are different checks.</p><p>An application adapter still detects two different names that map to one application field.</p></div></div>
         </section>
 
@@ -112,7 +318,7 @@
 
         <section id="ranges">
           <h2>Resolve a raw range in the producing call</h2>
-          <p><a data-api="Flyology_JSON.Parsing.Resolve_Raw_Range"><code>Resolve_Raw_Range</code></a> maps absolute source coordinates into the current input window. It validates coordinate containment only. It cannot authenticate an Ada array's identity or unchanged contents.</p>
+          <p><code>Resolve_Raw_Range</code> maps absolute source coordinates into the current input window. It validates coordinate containment only. It cannot authenticate an Ada array's identity or unchanged contents.</p>
           <p>Use the exact unchanged input actual from the call that produced the event. If a consumer must retain a range, copy it before the producing call returns. Do not attach an event to a later chunk that happens to have the same bounds.</p>
           <div class="callout"><div class="callout-symbol">0</div><div class="callout-body"><p class="callout-lede">All public offsets are zero-based octet coordinates.</p><p>Consumed, produced, and raw-slice positions are counts from the corresponding array's first bound.</p></div></div>
         </section>

@@ -6,7 +6,10 @@ project Flyology_JSON_Examples is
    for Exec_Dir use "bin";
    for Create_Missing_Dirs use "True";
    for Main use
-     ("streaming_parser.adb", "transactional_writer.adb", "landing_samples.adb");
+     ("streaming_parser.adb",
+      "large_file_parser.adb",
+      "transactional_writer.adb",
+      "landing_samples.adb");
 
    package Compiler is
       for Default_Switches ("Ada") use

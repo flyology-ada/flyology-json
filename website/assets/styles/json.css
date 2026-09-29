@@ -286,7 +286,8 @@
   margin-block: 2rem;
 }
 
-.sequence > div {
+.sequence > div,
+.sequence > li {
   padding: 1rem;
   border: 1px solid var(--line);
   border-top: 3px solid var(--json-blue);
@@ -296,6 +297,38 @@
 .sequence strong,
 .sequence span { display: block; }
 .sequence span { margin-top: 0.3rem; color: var(--ink-soft); font-size: 0.78rem; }
+
+.large-file-chapter > p { max-width: 70ch; }
+
+.prose ol.large-file-sequence {
+  padding-left: 0;
+  list-style: none;
+}
+
+.large-file-sequence > li + li { margin-top: 0; }
+
+.large-file-sequence > li:nth-child(2) { border-top-color: var(--json-coral); }
+.large-file-sequence > li:nth-child(3) { border-top-color: var(--json-mint); }
+.large-file-sequence > li:nth-child(4) { border-top-color: var(--json-amber); }
+
+.large-file-code figcaption {
+  display: flex;
+  min-height: 3.25rem;
+  align-items: center;
+  padding-right: 5rem;
+}
+
+.large-file-code .copy-button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  top: 0.25rem;
+  right: 0.25rem;
+}
+
+.prose .large-file-code pre {
+  border-radius: 0;
+  padding: 1.35rem;
+}
 
 @media (max-width: 980px) {
   .json-hero { grid-template-columns: 1fr; min-height: auto; }
@@ -321,6 +354,11 @@
   .boundary-grid,
   .guide-grid,
   .sequence { grid-template-columns: 1fr; }
+  .large-file-chapter .callout { grid-template-columns: 1fr; }
+  .large-file-chapter .callout-table { table-layout: fixed; }
+  .large-file-chapter .callout-table th:first-child,
+  .large-file-chapter .callout-table td:first-child { width: 42%; }
+  .large-file-chapter .callout-table code { overflow-wrap: anywhere; }
   .transaction-line { grid-template-columns: 1fr; }
   .transaction-link { width: 1px; height: 1.2rem; margin-inline: auto; }
   .acceptance-gate { flex-direction: column; gap: 0.35rem; }
